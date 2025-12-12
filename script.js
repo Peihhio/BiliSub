@@ -3463,39 +3463,26 @@ async function cancelBatchProcess() {
             cancelBtn.style.display = 'none';
         }
 
-        // 根据是否还有正在处理的视频决定下一步
-        if (data.has_processing) {
-            // 还有视频在处理中，继续轮询等待它们完成
-            showToast('已取消未开始的任务，等待进行中的任务完成...', 'info');
+        // 所有任务都已结束，停止轮询
+        stopBatchPolling();
 
-            // 更新状态提示
-            const batchStatusBadge = document.getElementById('batchStatusBadge');
-            if (batchStatusBadge) {
-                batchStatusBadge.textContent = '部分取消';
-                batchStatusBadge.className = 'batch-status-badge cancelled';
-            }
-        } else {
-            // 所有任务都已结束，停止轮询
-            stopBatchPolling();
-
-            // 更新整体状态为取消（橙色）
-            const batchStatusBadge = document.getElementById('batchStatusBadge');
-            if (batchStatusBadge) {
-                batchStatusBadge.textContent = '已取消';
-                batchStatusBadge.className = 'batch-status-badge cancelled';
-            }
-
-            // 整体进度条设为100%橙色
-            const batchTotalProgress = document.querySelector('.batch-total-progress');
-            const batchTotalProgressBar = document.getElementById('batchTotalProgressBar');
-            const batchTotalPercent = document.getElementById('batchTotalPercent');
-            if (batchTotalProgress) batchTotalProgress.classList.add('cancelled');
-            if (batchTotalProgressBar) batchTotalProgressBar.style.width = '100%';
-            if (batchTotalPercent) batchTotalPercent.textContent = '100%';
-
-            setButtonLoading(false);
-            showToast('任务已取消', 'info');
+        // 更新整体状态为取消（橙色）
+        const batchStatusBadge = document.getElementById('batchStatusBadge');
+        if (batchStatusBadge) {
+            batchStatusBadge.textContent = '已取消';
+            batchStatusBadge.className = 'batch-status-badge cancelled';
         }
+
+        // 整体进度条设为100%橙色
+        const batchTotalProgress = document.querySelector('.batch-total-progress');
+        const batchTotalProgressBar = document.getElementById('batchTotalProgressBar');
+        const batchTotalPercent = document.getElementById('batchTotalPercent');
+        if (batchTotalProgress) batchTotalProgress.classList.add('cancelled');
+        if (batchTotalProgressBar) batchTotalProgressBar.style.width = '100%';
+        if (batchTotalPercent) batchTotalPercent.textContent = '100%';
+
+        setButtonLoading(false);
+        showToast('任务已取消', 'info');
 
     } catch (error) {
         console.error('取消请求失败:', error);

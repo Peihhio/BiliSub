@@ -102,6 +102,9 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 # 有字幕的视频几乎无压力，语音识别瓶颈在网络传输
 executor = ThreadPoolExecutor(max_workers=5)
 
+# 第三方直链专用执行器：使用 5 个并发 worker 最大化处理速度
+third_party_executor = ThreadPoolExecutor(max_workers=5)
+
 # Guest 账户专用配置
 guest_executor = ThreadPoolExecutor(max_workers=1)  # Guest 账户单线程执行
 guest_lock = threading.Lock()  # Guest 全局队列锁，确保多个 guest 用户排队
@@ -214,38 +217,48 @@ class TaskManager:
             return None
     
     def cancel_batch(self, batch_id):
-        """取消批量任务，标记未处理的视频为cancelled"""
+        """取消批量任务，标记未处理和正在处理的视频为cancelled"""
         with self.lock:
             if batch_id not in self.tasks:
                 return None
             
             task = self.tasks[batch_id]
             cancelled_indices = []
-            has_processing = False
+            processing_indices = []
             
             for idx, video in enumerate(task["videos"]):
-                # 只取消pending状态的视频
+                original_index = video.get("original_index", idx)
+                # 取消pending状态的视频
                 if video["status"] == "pending":
                     video["status"] = "cancelled"
-                    video["progress"] = 100  # 设置为100%显示红色进度条
-                    cancelled_indices.append(video.get("original_index", idx))
+                    video["progress"] = 100  # 设置为100%显示橙色进度条
+                    cancelled_indices.append(original_index)
+                # 也取消processing状态的视频（它们实际上可能还在后台执行，但UI上标记为取消）
                 elif video["status"] == "processing":
-                    has_processing = True  # 有正在处理的视频
+                    video["status"] = "cancelled"
+                    video["progress"] = 100  # 设置为100%显示橙色进度条
+                    processing_indices.append(original_index)
             
             # 更新完成计数（包括cancelled的）
             finished = sum(1 for v in task["videos"] 
                           if v["status"] in ['completed', 'error', 'cancelled'])
             task["completed_count"] = finished
             
-            # 如果所有任务都结束了，标记批次为cancelled
-            if finished == task["total"]:
-                task["status"] = "cancelled"
+            # 标记批次为cancelled
+            task["status"] = "cancelled"
             
             return {
-                "cancelled_indices": cancelled_indices, 
+                "cancelled_indices": cancelled_indices + processing_indices, 
                 "status": task["status"],
-                "has_processing": has_processing
+                "has_processing": False  # 不再需要等待，都已标记为取消
             }
+    
+    def is_batch_cancelled(self, batch_id):
+        """检查批次是否已被取消"""
+        with self.lock:
+            if batch_id in self.tasks:
+                return self.tasks[batch_id].get("status") == "cancelled"
+            return False
 
 task_manager = TaskManager()
 
@@ -679,15 +692,16 @@ def download_bilibili_audio(url: str, output_dir: str, log_collector: LogCollect
 def upload_to_temp_storage(file_path: str, log_collector: LogCollector) -> str:
     """
     上传文件到临时存储服务
-    按顺序检测并上传，找到可用的立即使用
+    并发探测所有服务可用性，然后并发上传，谁先成功用谁
     """
     import requests
     import os
     from urllib.parse import urlparse
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
     filename = os.path.basename(file_path)
     
-    # 临时存储服务列表（按优先级排序）
+    # 临时存储服务列表
     services = [
         {
             'name': 'tmpfile.link',
@@ -696,7 +710,7 @@ def upload_to_temp_storage(file_path: str, log_collector: LogCollector) -> str:
             'field': 'file',
             'data': {},
             'response_type': 'json',
-            'json_key': 'downloadLink'  # tmpfile.link returns url in 'downloadLink' field
+            'json_key': 'downloadLink'
         },
         {
             'name': 'litterbox.catbox.moe',
@@ -732,26 +746,18 @@ def upload_to_temp_storage(file_path: str, log_collector: LogCollector) -> str:
         }
     ]
     
-    last_error = ""
-    
-    for service in services:
-        # === 第一步：快速检测连通性（3秒超时） ===
-        log_collector.info(f"检测 {service['name']} 可用性...")
+    def check_service(service):
+        """检查单个服务可用性"""
         try:
-            check_resp = requests.head(service['check_url'], timeout=3, allow_redirects=True)
-            if check_resp.status_code >= 500:
-                log_collector.info(f"  ✗ {service['name']} 服务器错误，跳过")
-                continue
-        except requests.exceptions.Timeout:
-            log_collector.info(f"  ✗ {service['name']} 超时，跳过")
-            continue
-        except Exception:
-            log_collector.info(f"  ✗ {service['name']} 连接失败，跳过")
-            continue
-        
-        log_collector.info(f"  ✓ {service['name']} 可用，开始上传...")
-        
-        # === 第二步：上传文件 ===
+            check_resp = requests.head(service['check_url'], timeout=3, allow_redirects=True, proxies={})
+            if check_resp.status_code < 500:
+                return service
+        except:
+            pass
+        return None
+    
+    def upload_to_service(service, file_path, filename):
+        """上传到单个服务"""
         try:
             method = service.get('method', 'POST')
             
@@ -761,7 +767,8 @@ def upload_to_temp_storage(file_path: str, log_collector: LogCollector) -> str:
                         service['upload_url'], 
                         data=f, 
                         timeout=120,
-                        headers={'Content-Type': 'application/octet-stream'}
+                        headers={'Content-Type': 'application/octet-stream'},
+                        proxies={}
                     )
             else:
                 with open(file_path, 'rb') as f:
@@ -770,71 +777,80 @@ def upload_to_temp_storage(file_path: str, log_collector: LogCollector) -> str:
                         service['upload_url'], 
                         files=files, 
                         data=service.get('data', {}), 
-                        timeout=120
+                        timeout=120,
+                        proxies={}
                     )
             
             if response.status_code in [200, 201]:
-                # 解析响应
+                # 解析响应获取 URL
                 if service.get('response_type') == 'json':
-                    try:
-                        json_data = response.json()
-                        logger.debug(f"[Upload] {service['name']} 响应: {json_data}")
-                        
-                        # 宽松检查：只有当明确返回 success=False 时才报错
-                        if 'success' in json_data and str(json_data.get('success')).lower() == 'false':
-                             raise Exception(f"API返回失败: {json_data}")
-                        
-                        # 获取 URL - 尝试多种常见的key
-                        primary_key = service.get('json_key', 'link')
-                        result_url = json_data.get(primary_key)
-                        
-                        # 如果主key失败，尝试其他常见key
-                        if not result_url or not isinstance(result_url, str):
-                            for fallback_key in ['downloadLink', 'url', 'link', 'file_url', 'data']:
-                                if fallback_key in json_data:
-                                    val = json_data[fallback_key]
-                                    if isinstance(val, str) and val.startswith('http'):
-                                        result_url = val
-                                        log_collector.info(f"使用备用key '{fallback_key}' 获取URL")
-                                        break
-                        
-                        if not result_url or not isinstance(result_url, str):
-                            log_collector.warning(f"无法从响应中提取URL: {json_data}")
-                            raise Exception(f"响应中未找到有效URL")
-                            
-                    except ValueError:
-                        raise Exception(f"无法解析JSON: {response.text[:100]}")
+                    json_data = response.json()
+                    if 'success' in json_data and str(json_data.get('success')).lower() == 'false':
+                        return None
+                    
+                    primary_key = service.get('json_key', 'link')
+                    result_url = json_data.get(primary_key)
+                    
+                    if not result_url or not isinstance(result_url, str):
+                        for fallback_key in ['downloadLink', 'url', 'link', 'file_url', 'data']:
+                            if fallback_key in json_data:
+                                val = json_data[fallback_key]
+                                if isinstance(val, str) and val.startswith('http'):
+                                    result_url = val
+                                    break
                 else:
                     result_url = response.text.strip()
                 
                 if result_url and result_url.startswith('http'):
-                    # === 第三步：验证链接可访问性 ===
-                    log_collector.info(f"验证链接可访问性...")
-                    try:
-                        verify_resp = requests.head(result_url, timeout=10, allow_redirects=True)
-                        if verify_resp.status_code >= 400:
-                            raise Exception(f"链接返回 HTTP {verify_resp.status_code}")
-                        log_collector.info(f"上传成功: {result_url[:60]}...")
-                        return result_url
-                    except requests.exceptions.Timeout:
-                        log_collector.warning(f"链接验证超时，尝试下一个服务...")
-                        last_error = f"{service['name']}: 链接验证超时"
-                        continue
-                    except Exception as ve:
-                        log_collector.warning(f"链接验证失败: {ve}")
-                        last_error = f"{service['name']}: 链接不可访问"
-                        continue
-                else:
-                    raise Exception(f"返回非URL: {result_url[:100] if result_url else '空响应'}")
-            else:
-                last_error = f"{service['name']}: HTTP {response.status_code}"
-                log_collector.warning(f"上传失败: {last_error}")
+                    # 验证链接可访问性
+                    verify_resp = requests.head(result_url, timeout=10, allow_redirects=True, proxies={})
+                    if verify_resp.status_code < 400:
+                        return (service['name'], result_url)
         except Exception as e:
-            last_error = f"{service['name']}: {str(e)}"
-            log_collector.warning(f"上传失败: {last_error}")
-            continue
+            pass
+        return None
     
-    raise Exception(f"所有上传服务均失败: {last_error}")
+    # === 第一步：并发探测所有服务可用性 ===
+    log_collector.info("并发探测第三方存储服务...")
+    available_services = []
+    
+    with ThreadPoolExecutor(max_workers=5) as check_executor:
+        futures = {check_executor.submit(check_service, s): s for s in services}
+        for future in as_completed(futures, timeout=5):
+            try:
+                result = future.result()
+                if result:
+                    available_services.append(result)
+                    log_collector.info(f"  ✓ {result['name']} 可用")
+            except:
+                pass
+    
+    if not available_services:
+        raise Exception("所有第三方存储服务均不可用")
+    
+    log_collector.info(f"发现 {len(available_services)} 个可用服务，开始并发上传...")
+    
+    # === 第二步：并发上传到所有可用服务，谁先成功用谁 ===
+    with ThreadPoolExecutor(max_workers=len(available_services)) as upload_executor:
+        futures = {
+            upload_executor.submit(upload_to_service, s, file_path, filename): s 
+            for s in available_services
+        }
+        
+        for future in as_completed(futures, timeout=120):
+            try:
+                result = future.result()
+                if result:
+                    service_name, result_url = result
+                    log_collector.info(f"上传成功 ({service_name}): {result_url[:60]}...")
+                    # 取消其他未完成的上传任务
+                    for f in futures:
+                        f.cancel()
+                    return result_url
+            except:
+                pass
+    
+    raise Exception("所有上传服务均失败")
 
 
 def check_self_hosted_domain(domain: str, log_collector: LogCollector):
@@ -2020,7 +2036,8 @@ def llm_process():
         def make_request(url):
             logging.info(f"尝试调用大模型API: {url}, 模型: {model}")
             try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=120)
+                # 禁用代理，避免本地代理拦截返回 HTML
+                resp = requests.post(url, headers=headers, json=payload, timeout=120, proxies={})
                 
                 # 记录响应简要信息
                 content_type = resp.headers.get('Content-Type', '').lower()
@@ -2549,12 +2566,24 @@ def process_single_video_task(batch_id, video_index, video_info, api_key, bili_c
             task_manager.update_video_status(batch_id, video_index, "completed", progress=100, result={"transcript": transcript})
             return
         
+        # 检查是否已取消（在耗时的语音识别开始前检查）
+        if task_manager.is_batch_cancelled(batch_id):
+            logger.info(f"[Task {video_index}] 批次已取消，跳过语音识别")
+            task_manager.update_video_status(batch_id, video_index, "cancelled", progress=100)
+            return
+        
         # 3. 语音识别流程 - 需要延迟避免 B站 风控
         import time
         import random
         delay = random.uniform(0.5, 1.5)  # 较短延迟，仅在下载音频前
         logger.info(f"[Task {video_index}] 准备下载音频，等待 {delay:.1f} 秒防风控...")
         time.sleep(delay)
+        
+        # 再次检查是否已取消
+        if task_manager.is_batch_cancelled(batch_id):
+            logger.info(f"[Task {video_index}] 批次已取消，跳过音频下载")
+            task_manager.update_video_status(batch_id, video_index, "cancelled", progress=100)
+            return
             
         logger.info(f"[Task {video_index}] 开始语音识别流程...")
         log_collector.info("使用语音识别...")
@@ -2562,6 +2591,12 @@ def process_single_video_task(batch_id, video_index, video_info, api_key, bili_c
         # 下载音频
         audio_path, duration = download_bilibili_audio(video_url, AUDIO_DIR, log_collector)
         logger.info(f"[Task {video_index}] 音频下载完成: {audio_path}")
+        
+        # 下载完成后再次检查是否已取消
+        if task_manager.is_batch_cancelled(batch_id):
+            logger.info(f"[Task {video_index}] 批次已取消，跳过转录")
+            task_manager.update_video_status(batch_id, video_index, "cancelled", progress=100)
+            return
         
         # 转录音频
         transcript = transcribe_audio(audio_path, api_key, log_collector, self_hosted_domain if use_self_hosted else None, duration)
@@ -2655,37 +2690,44 @@ def transcribe_batch():
     batch_id = task_manager.create_batch(len(videos))
     
     # === 选择执行器和执行方式 ===
-    # Guest 用户或第三方直链：使用 guest_executor 顺序处理
-    use_sequential = is_guest or not use_self_hosted
-    
-    if use_sequential:
-        # 定义顺序处理函数
+    if is_guest:
+        # Guest 用户：完全串行处理，确保公平排队
         def process_batch_sequentially():
-            # Guest 用户需要获取全局锁，确保多个 guest 用户排队
-            if is_guest:
-                with guest_lock:
-                    logger.info(f"[Guest] 获得全局锁，开始处理批次 {batch_id}")
-                    for video in videos:
-                        v_idx = task_manager.init_video(batch_id, video)
-                        process_single_video_task(
-                            batch_id, v_idx, video, api_key, bili_cookie,
-                            use_self_hosted, self_hosted_domain
-                        )
-                    logger.info(f"[Guest] 批次 {batch_id} 处理完成，释放全局锁")
-            else:
-                # 第三方直链：顺序处理但无需排队
+            with guest_lock:
+                logger.info(f"[Guest] 获得全局锁，开始处理批次 {batch_id}")
                 for video in videos:
+                    # 检查批次是否已取消
+                    if task_manager.is_batch_cancelled(batch_id):
+                        logger.info(f"[Guest] 批次 {batch_id} 已取消，停止处理后续视频")
+                        break
                     v_idx = task_manager.init_video(batch_id, video)
                     process_single_video_task(
                         batch_id, v_idx, video, api_key, bili_cookie,
                         use_self_hosted, self_hosted_domain
                     )
+                logger.info(f"[Guest] 批次 {batch_id} 处理完成，释放全局锁")
         
-        # 提交到 guest_executor（单线程）
         guest_executor.submit(process_batch_sequentially)
-        mode = "顺序处理" + (" (Guest排队)" if is_guest else " (第三方直链)")
+        mode = "顺序处理 (Guest排队)"
+    
+    elif not use_self_hosted:
+        # 第三方直链：使用 2 并发处理，显著提升速度
+        for video in videos:
+            v_idx = task_manager.init_video(batch_id, video)
+            third_party_executor.submit(
+                process_single_video_task,
+                batch_id,
+                v_idx,
+                video,
+                api_key,
+                bili_cookie,
+                use_self_hosted,
+                self_hosted_domain
+            )
+        mode = "并发处理 (第三方直链, 5并发)"
+    
     else:
-        # 自建服务的非 Guest 用户：并行处理
+        # 自建服务的非 Guest 用户：5 并发处理
         for video in videos:
             v_idx = task_manager.init_video(batch_id, video)
             executor.submit(
@@ -2698,7 +2740,7 @@ def transcribe_batch():
                 use_self_hosted,
                 self_hosted_domain
             )
-        mode = "并行处理"
+        mode = "并发处理 (自建直链, 5并发)"
     
     logger.info(f"[Batch] 批次 {batch_id}: {len(videos)} 个视频, 模式: {mode}")
     
