@@ -98,9 +98,9 @@ AUDIO_DIR = os.path.join(TEMP_DIR, 'bilisub_audio')
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # 全局任务池
-# max_workers=5 经测试在 B站 rate limit 容忍范围内
+# max_workers=8 经测试在 B站 rate limit 容忍范围内
 # 有字幕的视频几乎无压力，语音识别瓶颈在网络传输
-executor = ThreadPoolExecutor(max_workers=5)
+executor = ThreadPoolExecutor(max_workers=8)
 
 # 第三方直链专用执行器：使用 5 个并发 worker 最大化处理速度
 third_party_executor = ThreadPoolExecutor(max_workers=5)
@@ -2740,7 +2740,7 @@ def transcribe_batch():
                 use_self_hosted,
                 self_hosted_domain
             )
-        mode = "并发处理 (自建直链, 5并发)"
+        mode = "并发处理 (自建直链, 8并发)"
     
     logger.info(f"[Batch] 批次 {batch_id}: {len(videos)} 个视频, 模式: {mode}")
     
