@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BiliSub - 管理后台</title>
+    <!-- 使用国内 CDN 镜像加速字体加载 -->
+    <link rel="preconnect" href="https://fonts.loli.net" crossorigin>
+    <link href="https://fonts.loli.net/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: rgba(22, 22, 32, 0.8);
+            --bg-input: rgba(30, 30, 45, 0.6);
+            --bg-hover: rgba(40, 40, 60, 0.8);
+            --text-primary: #f0f0f5;
+            --text-secondary: #9898a8;
+            --text-muted: #6a6a7a;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-focus: rgba(99, 102, 241, 0.5);
+            --radius-sm: 0.5rem;
+            --radius-md: 0.75rem;
+            --radius-lg: 1rem;
+            --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .header-actions a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s;
+        }
+
+        .header-actions a:hover {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        .stat-card .value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stat-card .label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .section-header h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent-gradient);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            opacity: 0.9;
+        }
+
+        .btn-secondary {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-input);
+        }
+
+        /* 邀请码区域 */
+        .invite-code-box {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .invite-code-display {
+            font-family: monospace;
+            font-size: 1.25rem;
+            background: var(--bg-input);
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            color: var(--accent-primary);
+            letter-spacing: 0.1em;
+        }
+
+        .invite-code-input {
+            font-family: monospace;
+            font-size: 1rem;
+            background: var(--bg-input);
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            width: 200px;
+        }
+
+        .invite-code-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        /* 用户表格 */
+        .user-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .user-table th,
+        .user-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .user-table th {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .user-table tr:hover {
+            background: var(--bg-hover);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-admin {
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--accent-primary);
+        }
+
+        .badge-user {
+            background: rgba(152, 152, 168, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            border-radius: var(--radius-md);
+            color: white;
+            font-weight: 500;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast-success {
+            background: var(--success);
+        }
+
+        .toast-error {
+            background: var(--error);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .modal-content h3 {
+            margin-bottom: 1rem;
+        }
+
+        .modal-content .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .modal-content label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .modal-content input {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+        }
+
+        .modal-content input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+            margin-top: 1.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <h1>BiliSub 管理后台</h1>
+        <div class="header-actions">
+            <a href="/">← 返回主页</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- 统计信息 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="totalUsers">-</div>
+                <div class="label">注册用户</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="totalHistory">-</div>
+                <div class="label">历史记录</div>
+            </div>
+        </div>
+
+        <!-- 邀请码管理 -->
+        <div class="section">
+            <div class="section-header">
+                <h2>🔑 邀请码管理</h2>
+            </div>
+            <div class="invite-code-box">
+                <span>当前邀请码：</span>
+                <span class="invite-code-display" id="currentInviteCode">加载中...</span>
+                <button class="btn btn-secondary" onclick="copyInviteCode()">复制</button>
+                <button class="btn btn-secondary" onclick="showEditInviteCode()">修改</button>
+                <button class="btn btn-primary" onclick="regenerateInviteCode()">重新生成</button>
+            </div>
+            <div class="invite-code-box" style="margin-top: 1rem;">
+                <span>使用统计：</span>
+                <span id="inviteCodeUsage" style="color: var(--text-secondary);">已使用 0 / 不限</span>
+                <button class="btn btn-secondary" onclick="showSetLimitModal()">设置次数限制</button>
+            </div>
+        </div>
+
+        <!-- 用户管理 -->
+        <div class="section">
+            <div class="section-header">
+                <h2>👥 用户管理</h2>
+            </div>
+            <table class="user-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>用户名</th>
+                        <th>角色</th>
+                        <th>注册时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="userList">
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: var(--text-muted);">加载中...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 修改邀请码弹窗 -->
+    <div class="modal" id="editInviteCodeModal">
+        <div class="modal-content">
+            <h3>修改邀请码</h3>
+            <div class="form-group">
+                <label>新邀请码</label>
+                <input type="text" id="newInviteCode" placeholder="至少 4 个字符">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideModal('editInviteCodeModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveInviteCode()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 重置密码弹窗 -->
+    <div class="modal" id="resetPasswordModal">
+        <div class="modal-content">
+            <h3>重置密码</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                为用户 <strong id="resetPasswordUsername"></strong> 设置新密码
+            </p>
+            <div class="form-group">
+                <label>新密码</label>
+                <input type="password" id="newPassword" placeholder="至少 4 个字符">
+            </div>
+            <input type="hidden" id="resetPasswordUserId">
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideModal('resetPasswordModal')">取消</button>
+                <button class="btn btn-primary" onclick="confirmResetPassword()">确认重置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设置次数限制弹窗 -->
+    <div class="modal" id="setLimitModal">
+        <div class="modal-content">
+            <h3>设置使用次数限制</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                设置为 0 表示不限制使用次数
+            </p>
+            <div class="form-group">
+                <label>次数限制</label>
+                <input type="number" id="inviteCodeLimit" min="0" placeholder="0 = 不限制">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideModal('setLimitModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveInviteCodeLimit()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 加载数据
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/admin/stats');
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('totalUsers').textContent = data.stats.total_users;
+                    document.getElementById('totalHistory').textContent = data.stats.total_history;
+                }
+            } catch (error) {
+                console.error('加载统计失败:', error);
+            }
+        }
+
+        let currentInviteLimit = 0;
+        let currentInviteUsed = 0;
+
+        async function loadInviteCode() {
+            try {
+                const response = await fetch('/api/admin/invite-code');
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('currentInviteCode').textContent = data.invite_code;
+                    currentInviteLimit = data.limit || 0;
+                    currentInviteUsed = data.used || 0;
+                    updateInviteUsageDisplay();
+                }
+            } catch (error) {
+                console.error('加载邀请码失败:', error);
+            }
+        }
+
+        function updateInviteUsageDisplay() {
+            const usageEl = document.getElementById('inviteCodeUsage');
+            if (currentInviteLimit > 0) {
+                const remaining = currentInviteLimit - currentInviteUsed;
+                usageEl.innerHTML = `已使用 <strong>${currentInviteUsed}</strong> / <strong>${currentInviteLimit}</strong>（剩余 ${remaining} 次）`;
+                if (remaining <= 0) {
+                    usageEl.style.color = 'var(--error)';
+                } else if (remaining <= 3) {
+                    usageEl.style.color = 'var(--warning)';
+                } else {
+                    usageEl.style.color = 'var(--text-secondary)';
+                }
+            } else {
+                usageEl.innerHTML = `已使用 <strong>${currentInviteUsed}</strong> 次（不限制）`;
+                usageEl.style.color = 'var(--text-secondary)';
+            }
+        }
+
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/admin/users');
+                const data = await response.json();
+                if (data.success) {
+                    const tbody = document.getElementById('userList');
+                    tbody.innerHTML = data.users.map(user => `
+                        <tr>
+                            <td>${user.id}</td>
+                            <td>${user.username}</td>
+                            <td>
+                                <span class="badge ${user.is_admin ? 'badge-admin' : 'badge-user'}">
+                                    ${user.is_admin ? '管理员' : '用户'}
+                                </span>
+                            </td>
+                            <td>${new Date(user.created_at).toLocaleString()}</td>
+                            <td class="actions">
+                                <button class="btn btn-secondary" onclick="showResetPassword(${user.id}, '${user.username}')">
+                                    重置密码
+                                </button>
+                                ${!user.is_admin ? `
+                                    <button class="btn btn-danger" onclick="deleteUser(${user.id}, '${user.username}')">
+                                        删除
+                                    </button>
+                                ` : ''}
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('加载用户列表失败:', error);
+            }
+        }
+
+        // 邀请码操作
+        function copyInviteCode() {
+            const code = document.getElementById('currentInviteCode').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                showToast('邀请码已复制', 'success');
+            });
+        }
+
+        function showEditInviteCode() {
+            document.getElementById('newInviteCode').value = document.getElementById('currentInviteCode').textContent;
+            document.getElementById('editInviteCodeModal').classList.add('show');
+        }
+
+        async function saveInviteCode() {
+            const newCode = document.getElementById('newInviteCode').value.trim();
+            if (newCode.length < 4) {
+                showToast('邀请码至少 4 个字符', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/admin/invite-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ invite_code: newCode })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('currentInviteCode').textContent = data.invite_code;
+                    hideModal('editInviteCodeModal');
+                    showToast('邀请码已更新', 'success');
+                } else {
+                    showToast(data.error, 'error');
+                }
+            } catch (error) {
+                showToast('操作失败', 'error');
+            }
+        }
+
+        async function regenerateInviteCode() {
+            if (!confirm('确定要重新生成邀请码吗？旧邀请码将失效，使用次数将重置。')) return;
+
+            try {
+                const response = await fetch('/api/admin/invite-code/regenerate', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('currentInviteCode').textContent = data.invite_code;
+                    currentInviteLimit = data.limit || 0;
+                    currentInviteUsed = data.used || 0;
+                    updateInviteUsageDisplay();
+                    showToast('邀请码已重新生成，使用次数已重置', 'success');
+                } else {
+                    showToast(data.error, 'error');
+                }
+            } catch (error) {
+                showToast('操作失败', 'error');
+            }
+        }
+
+        function showSetLimitModal() {
+            document.getElementById('inviteCodeLimit').value = currentInviteLimit;
+            document.getElementById('setLimitModal').classList.add('show');
+        }
+
+        async function saveInviteCodeLimit() {
+            const limit = parseInt(document.getElementById('inviteCodeLimit').value) || 0;
+            if (limit < 0) {
+                showToast('次数限制不能为负数', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/admin/invite-code/limit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ limit: limit })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    currentInviteLimit = data.limit;
+                    updateInviteUsageDisplay();
+                    hideModal('setLimitModal');
+                    showToast(data.message, 'success');
+                } else {
+                    showToast(data.error, 'error');
+                }
+            } catch (error) {
+                showToast('操作失败', 'error');
+            }
+        }
+
+        // 用户操作
+        function showResetPassword(userId, username) {
+            document.getElementById('resetPasswordUserId').value = userId;
+            document.getElementById('resetPasswordUsername').textContent = username;
+            document.getElementById('newPassword').value = '';
+            document.getElementById('resetPasswordModal').classList.add('show');
+        }
+
+        async function confirmResetPassword() {
+            const userId = document.getElementById('resetPasswordUserId').value;
+            const newPassword = document.getElementById('newPassword').value;
+
+            if (newPassword.length < 4) {
+                showToast('密码至少 4 个字符', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/reset-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_password: newPassword })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    hideModal('resetPasswordModal');
+                    showToast('密码已重置', 'success');
+                } else {
+                    showToast(data.error, 'error');
+                }
+            } catch (error) {
+                showToast('操作失败', 'error');
+            }
+        }
+
+        async function deleteUser(userId, username) {
+            if (!confirm(`确定要删除用户 "${username}" 吗？该用户的所有数据将被永久删除！`)) return;
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    loadUsers();
+                    loadStats();
+                    showToast('用户已删除', 'success');
+                } else {
+                    showToast(data.error, 'error');
+                }
+            } catch (error) {
+                showToast('操作失败', 'error');
+            }
+        }
+
+        // 工具函数
+        function hideModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // 点击模态框外部关闭
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.classList.remove('show');
+                }
+            });
+        });
+
+        // 初始化
+        loadStats();
+        loadInviteCode();
+        loadUsers();
+    </script>
+</body>
+
+</html>

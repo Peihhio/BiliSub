@@ -1,0 +1,47 @@
+# 开发和运行时生成的文件
+database/
+data/
+temp/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# 日志文件
+*.log
+server.log
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Git
+.git/
+.gitignore
+
+# 测试和文档
+tests/
+docs/
+*.md
+!README.md
+
+# 环境文件
+.env
+.env.local
+.env.*.local
+*.env
+
+# 其他
+*.bak
+*.tmp
+*.temp

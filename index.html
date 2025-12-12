@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="B站视频字幕提取工具 - 使用阿里云Paraformer AI语音识别技术从B站视频中提取字幕">
+    <title>BiliSub - B站字幕提取</title>
+    <!-- 使用国内 CDN 镜像加速字体加载 -->
+    <link rel="preconnect" href="https://fonts.loli.net" crossorigin>
+    <link href="https://fonts.loli.net/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="background-decoration">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                </svg>
+                <h1>BiliSub</h1>
+            </div>
+            <p class="subtitle">AI驱动的B站视频字幕提取工具</p>
+
+            <!-- 用户信息区域 -->
+            <div class="user-area" id="userArea">
+                <span class="user-name" id="userName">用户</span>
+                <button class="user-menu-btn" id="userMenuBtn" onclick="toggleUserMenu()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                        <circle cx="12" cy="7" r="4" />
+                    </svg>
+                </button>
+                <div class="user-dropdown" id="userDropdown">
+                    <a href="#" onclick="showChangePasswordModal(); return false;">修改密码</a>
+                    <a href="/admin" id="adminLink" style="display: none;">管理后台</a>
+                    <a href="#" onclick="logout(); return false;" class="logout-link">退出登录</a>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- 配置区域 -->
+            <!-- 配置区域 -->
+            <section class="card config-section" id="configSection">
+                <div class="config-header" id="configHeader" onclick="toggleConfigSection()">
+                    <div class="header-title">
+                        <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                            </path>
+                        </svg>
+                        <h2>配置</h2>
+                    </div>
+
+                    <!-- 配置状态摘要 -->
+                    <div class="config-status-summary">
+                        <span class="config-status-item" id="apiKeyStatus">
+                            <span class="status-dot" id="apiKeyStatusDot"></span>
+                            API Key
+                        </span>
+                        <span class="config-status-item" id="cookieStatus">
+                            <span class="status-dot" id="cookieStatusDot"></span>
+                            Cookie
+                        </span>
+                        <span class="config-status-item" id="llmStatus">
+                            <span class="status-dot" id="llmStatusDot"></span>
+                            大模型
+                        </span>
+                        <span class="config-status-item" id="storageStatus">
+                            <span class="status-dot" id="storageStatusDot"></span>
+                            <span id="storageStatusText">第三方直链</span>
+                        </span>
+                    </div>
+
+                    <svg class="collapse-arrow" id="configCollapseArrow" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+
+                <div class="config-content" id="configContent" style="display: none;">
+
+                    <div class="input-group">
+                        <label for="apiKey" class="input-label">
+                            阿里云 DashScope API Key
+                            <span class="tooltip" data-tooltip="在阿里云百炼平台获取API Key">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                            </span>
+                        </label>
+                        <div class="input-wrapper">
+                            <input type="password" id="apiKey" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                                autocomplete="off">
+                            <button type="button" class="toggle-visibility" id="toggleApiKey" title="显示/隐藏">
+                                <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                    <circle cx="12" cy="12" r="3" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="save-key-row">
+                            <button type="button" class="btn btn-secondary btn-sm" id="saveAndVerifyApiKey">
+                                保存配置并验证
+                            </button>
+                            <span class="verify-status" id="apiKeyVerifyStatus"></span>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="biliCookie" class="input-label">
+                            B站Cookie（必需，用于提取AI字幕）
+                            <span class="tooltip" data-tooltip="需要从浏览器复制完整Cookie才能正确提取AI字幕">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                            </span>
+                        </label>
+
+                        <!-- Cookie状态指示器 -->
+                        <div class="cookie-status-bar" id="cookieStatusBar">
+                            <div class="cookie-status-indicator" id="cookieStatusIndicator">
+                                <span class="status-icon" id="cookieStatusIcon">⚪</span>
+                                <span class="status-text" id="cookieStatusText">未配置Cookie</span>
+                            </div>
+                            <button type="button" id="verifyCookieBtn" class="verify-cookie-btn" title="验证Cookie">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="23 4 23 10 17 10" />
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- Cookie输入区域 -->
+                        <div class="cookie-input-section">
+                            <div class="input-wrapper">
+                                <input type="password" id="fullCookieText" class="cookie-input"
+                                    placeholder="请从浏览器复制完整Cookie粘贴到这里（必须包含 SESSDATA、buvid3、bili_jct）"
+                                    style="width: 100%; padding-right: 40px; height: 40px;">
+                                <button type="button" class="toggle-visibility" id="toggleCookieVisibility"
+                                    title="显示/隐藏 Cookie">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path
+                                            d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24">
+                                        </path>
+                                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="cookie-help">
+                                <details>
+                                    <summary>📖 如何获取Cookie？（点击展开）</summary>
+                                    <ol class="cookie-steps">
+                                        <li>在Chrome浏览器中打开 <a href="https://www.bilibili.com"
+                                                target="_blank">bilibili.com</a> 并登录
+                                        </li>
+                                        <li>按 <kbd>F12</kbd> 打开开发者工具</li>
+                                        <li>切换到 <strong>Network（网络）</strong> 标签</li>
+                                        <li>刷新页面（按 <kbd>F5</kbd>）</li>
+                                        <li>点击任意一个请求</li>
+                                        <li>在右侧 <strong>Headers（标头）</strong> 中找到 <strong>Cookie</strong></li>
+                                        <li>复制Cookie的完整内容粘贴到上方</li>
+                                    </ol>
+                                </details>
+                            </div>
+                            <button type="button" id="saveCookieBtn" class="primary-button save-cookie-btn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                    <polyline points="17 21 17 13 7 13 7 21" />
+                                    <polyline points="7 3 7 8 15 8" />
+                                </svg>
+                                <span>保存并验证Cookie</span>
+                            </button>
+                        </div>
+                        <input type="hidden" id="biliCookie" value="">
+                    </div>
+
+
+                    <!-- 自建存储状态由 JS 自动检测，无需用户手动配置 -->
+                    <input type="checkbox" id="useSelfHostedStorage" style="display:none;">
+
+                    <!-- 大模型API配置 -->
+                    <div class="config-divider">
+                        <span>大模型API配置（OpenAI兼容格式）</span>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="llmApiKey" class="input-label">
+                            大模型 API Key
+                        </label>
+                        <div class="input-wrapper">
+                            <input type="password" id="llmApiKey" placeholder="留空则使用上方 DashScope API Key"
+                                autocomplete="off">
+                            <button type="button" class="toggle-visibility" id="toggleLlmApiKey" title="显示/隐藏">
+                                <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                    <circle cx="12" cy="12" r="3" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="llmApiUrl" class="input-label">
+                            API 接口地址
+                        </label>
+                        <div class="input-wrapper">
+                            <input type="text" id="llmApiUrl"
+                                placeholder="默认: https://dashscope.aliyuncs.com/compatible-mode/v1">
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="llmModelName" class="input-label">
+                            模型名称
+                        </label>
+                        <div class="input-wrapper">
+                            <input type="text" id="llmModelName" placeholder="默认: qwen-plus">
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="llmPrompt" class="input-label">
+                            提示词（System Prompt）
+                        </label>
+                        <div class="llm-prompt-section">
+                            <textarea id="llmPrompt" rows="4" placeholder="默认: 请将以下视频字幕总结为150字摘要。"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- LLM状态指示器 -->
+                    <div class="llm-status-bar" id="llmStatusBar">
+                        <div class="llm-status-indicator" id="llmStatusIndicator">
+                            <span class="status-icon" id="llmStatusIcon">⚪</span>
+                            <span class="status-text" id="llmStatusText">未配置</span>
+                        </div>
+                    </div>
+
+                    <button type="button" id="saveLlmConfigBtn" class="primary-button save-llm-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                            <polyline points="17 21 17 13 7 13 7 21" />
+                            <polyline points="7 3 7 8 15 8" />
+                        </svg>
+                        <span>保存配置并测试</span>
+                    </button>
+
+                    <div class="separator-line"></div>
+
+                    <button type="button" id="cleanupBtn" class="secondary-button" title="清理临时文件" style="width: auto;">
+                        <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                        <span>清理缓存</span>
+                    </button>
+
+                    <div class="separator-line"></div>
+
+                    <!-- config-content 结束 -->
+                </div>
+
+                <div class="input-group">
+                    <label for="videoUrl" class="input-label">
+                        B站视频/播放列表/合集链接
+                        <span class="tooltip" data-tooltip="支持单个视频、播放列表或合集链接">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                        </span>
+                    </label>
+                    <div class="input-wrapper">
+                        <input type="text" id="videoUrl" placeholder="https://www.bilibili.com/video/BV... 或合集链接">
+                    </div>
+                </div>
+
+                <button type="button" id="extractBtn" class="primary-button">
+                    <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                    <span class="button-text">提取字幕</span>
+                    <div class="button-loader" style="display: none;"></div>
+                </button>
+
+                <!-- Guest 配额显示 -->
+                <div id="guestQuotaDisplay" class="guest-quota-display" style="display: none;">
+                    <span class="quota-label">今日配额：</span>
+                    <span id="guestQuotaRemaining">5</span>/<span id="guestQuotaTotal">5</span>
+                </div>
+
+                <!-- 批量进度区域 -->
+                <div class="batch-progress-section" id="batchProgressSection" style="display: none;">
+                    <div class="batch-header">
+                        <h3 id="batchTitle">正在处理...</h3>
+                        <div class="batch-controls">
+                            <span class="batch-status-badge processing" id="batchStatusBadge">处理中</span>
+                            <button type="button" class="cancel-batch-btn" id="cancelBatchBtn"
+                                onclick="cancelBatchProcess()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                                取消
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 总进度 -->
+                    <div class="batch-total-progress">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="batchTotalProgressBar" style="width: 0%"></div>
+                        </div>
+                        <span class="total-percent" id="batchTotalPercent">0%</span>
+                    </div>
+
+                    <!-- 视频任务列表 -->
+                    <div class="batch-video-list" id="batchVideoList">
+                        <!-- Javascript 将在这里插入任务项 -->
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 当前任务区域（与历史任务同级，确保宽度一致） -->
+        <section class="history-section" id="currentTaskSection">
+            <div class="section-header">
+                <h2>🚀 当前任务</h2>
+            </div>
+            <div class="results-grid">
+                <section class="video-list-section history-list-section">
+                    <div class="history-list-header">
+                        <div class="history-list-header-left">
+                            <label class="checkbox-label select-all-label">
+                                <input type="checkbox" id="currentSelectAll">
+                                <span class="checkmark"></span>
+                                全选
+                            </label>
+                            <span class="history-count">共 <span id="videoCount">0</span> 条</span>
+                        </div>
+                        <div class="history-actions icon-only">
+                            <button type="button" id="currentAiProcessSelected" class="icon-action-btn ai-batch"
+                                title="AI批量处理选中" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                            </button>
+                            <button type="button" id="downloadAllBtn" class="icon-button" title="下载选中" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                            </button>
+                            <button type="button" id="currentDeleteSelected" class="icon-action-btn danger" title="删除选中"
+                                disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path
+                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                </svg>
+                            </button>
+                            <button type="button" id="currentClearAll" class="icon-button danger" title="清空列表">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <line x1="15" y1="9" x2="9" y2="15" />
+                                    <line x1="9" y1="9" x2="15" y2="15" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="video-list-content history-video-list" id="videoListContainer">
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+                                <polyline points="17 2 12 7 7 2" />
+                            </svg>
+                            <p>输入播放列表或合集链接后，视频列表将显示在这里</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="transcript-section history-transcript-section">
+                    <div class="section-header">
+                        <h3 id="currentVideoTitle">选择视频查看字幕</h3>
+                    </div>
+                    <div class="transcript-container" id="transcriptContainer">
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                            </svg>
+                            <p>点击左侧视频列表中的视频名称查看字幕</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </section>
+
+        <!-- 历史任务区域 -->
+        <section class="history-section" id="historySection">
+            <div class="section-header">
+                <h2>📚 历史任务</h2>
+            </div>
+            <div class="results-grid">
+                <section class="video-list-section history-list-section">
+                    <div class="history-list-header">
+                        <div class="history-list-header-left">
+                            <label class="checkbox-label select-all-label">
+                                <input type="checkbox" id="historySelectAll">
+                                <span class="checkmark"></span>
+                                全选
+                            </label>
+                            <span class="history-count">共 <span id="historyCount">0</span> 条</span>
+                        </div>
+                        <div class="history-actions icon-only">
+                            <button type="button" id="historyAiProcessSelected" class="icon-action-btn ai-batch"
+                                title="AI批量处理选中" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                            </button>
+                            <button type="button" id="historyDownloadSelected" class="icon-action-btn" title="下载选中"
+                                disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                            </button>
+                            <button type="button" id="historyDeleteSelected" class="icon-action-btn danger" title="删除选中"
+                                disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path
+                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                </svg>
+                            </button>
+                            <button type="button" id="historyClearAll" class="icon-action-btn danger" title="全部删除">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <line x1="15" y1="9" x2="9" y2="15" />
+                                    <line x1="9" y1="9" x2="15" y2="15" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="video-list history-video-list" id="historyVideoList">
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p>暂无历史记录</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="transcript-section history-transcript-section">
+                    <div class="section-header">
+                        <h3 id="historyCurrentVideoTitle">选择视频查看字幕</h3>
+                    </div>
+                    <div class="transcript-container" id="historyTranscriptContainer">
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                            </svg>
+                            <p>点击左侧视频查看字幕</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </section>
+
+        <footer class="footer">
+            <p>使用 <a href="https://help.aliyun.com/zh/model-studio/paraformer-real-time-speech-recognition-api"
+                    target="_blank">阿里云 Paraformer</a> 提供语音识别能力</p>
+        </footer>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- 修改密码弹窗 -->
+    <div class="modal" id="changePasswordModal">
+        <div class="modal-content">
+            <h3>修改密码</h3>
+            <div class="form-group">
+                <label>原密码</label>
+                <input type="password" id="oldPassword" placeholder="请输入原密码">
+            </div>
+            <div class="form-group">
+                <label>新密码</label>
+                <input type="password" id="newPassword" placeholder="至少 4 个字符">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="hideChangePasswordModal()">取消</button>
+                <button class="btn-primary" onclick="changePassword()">确认修改</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 外部库使用 defer 加载，不阻塞页面渲染 -->
+    <script defer src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="script.js?v=202512122345" defer></script>
+</body>
+
+</html>

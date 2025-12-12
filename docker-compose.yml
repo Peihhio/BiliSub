@@ -1,0 +1,13 @@
+version: '3.3'
+
+services:
+  bilisub:
+    build: .
+    container_name: bilisub
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      # 数据持久化：将容器内的数据库目录挂载到宿主机
+      # 格式：宿主机路径:容器内路径
+      - ./data:/app/database
