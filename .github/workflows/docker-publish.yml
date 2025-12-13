@@ -14,9 +14,8 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    # 修复 403 错误：赋予 GitHub Release 写入权限
+    permissions: write-all
 
     steps:
       # 1.甚至代码
@@ -39,9 +38,6 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # 5. 提取元数据 (tags, labels)
-      # 自动处理版本号逻辑：
-      # - 如果是 tag v1.0.0 -> 镜像标签为 :v1.0.0 和 :latest
-      # - 如果是 push main -> 镜像标签为 :main
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -67,21 +63,11 @@ jobs:
           cache-to: type=gha,mode=max
 
       # 7. 自动创建 GitHub Release
-      # 这样您在 GitHub 首页右侧就能看到最新的版本号，不用自己记
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          generate_release_notes: true # 自动生成更新日志
+          generate_release_notes: true
 
-      # 8. 自动同步 README 到 DockerHub
-      # 让 DockerHub 的介绍页面与 GitHub README 保持一致
-      - name: Update Docker Hub Description
-        uses: peter-evans/dockerhub-description@v3
-        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ env.IMAGE_NAME }}
 
 
