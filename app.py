@@ -3597,13 +3597,19 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                         history.transcript = transcript
                         history.updated_at = datetime.utcnow()
                     else:
-                        # 获取视频标题
-                        title = extension_task_manager.get_task(task_id).get('title', bvid)
+                        # 获取视频详细信息（包括封面）
+                        video_info = get_video_info_from_bilibili(bvid) or {}
+                        title = video_info.get('title') or extension_task_manager.get_task(task_id).get('title', bvid)
+                        
                         history = HistoryItem(
                             user_id=user_id,
                             url=f"https://www.bilibili.com/video/{bvid}",
                             bvid=bvid,
                             title=title,
+                            owner=video_info.get('owner', ''),
+                            cover=video_info.get('pic', ''),  # 封面 URL
+                            duration=video_info.get('duration', 0),
+                            pubdate=video_info.get('pubdate', 0),
                             transcript=transcript
                         )
                         db.session.add(history)
