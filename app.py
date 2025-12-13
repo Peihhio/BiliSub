@@ -270,6 +270,148 @@ class TaskManager:
 task_manager = TaskManager()
 
 
+class ExtensionTaskManager:
+    """
+    Chrome 插件专用任务管理器
+    用于管理单个视频的异步字幕提取任务
+    """
+    
+    # 任务状态常量
+    STATUS_PENDING = "pending"
+    STATUS_DOWNLOADING = "downloading"
+    STATUS_UPLOADING = "uploading"
+    STATUS_TRANSCRIBING = "transcribing"
+    STATUS_PROCESSING = "processing"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+    
+    # 阶段描述
+    STAGE_DESC = {
+        STATUS_PENDING: "等待处理",
+        STATUS_DOWNLOADING: "正在下载音频",
+        STATUS_UPLOADING: "正在上传到云端",
+        STATUS_TRANSCRIBING: "正在语音识别",
+        STATUS_PROCESSING: "正在处理结果",
+        STATUS_COMPLETED: "字幕提取完成",
+        STATUS_FAILED: "处理失败",
+        STATUS_CANCELLED: "已取消"
+    }
+    
+    def __init__(self):
+        self.tasks = {}  # task_id -> task_info
+        self.user_tasks = {}  # user_id -> {bvid -> task_id}
+        self.lock = threading.Lock()
+    
+    def create_task(self, user_id: int, bvid: str, title: str = None, use_asr: bool = False) -> str:
+        """创建新任务，返回任务ID"""
+        task_id = str(uuid.uuid4())
+        with self.lock:
+            # 检查该用户是否已有该视频的任务
+            if user_id in self.user_tasks and bvid in self.user_tasks[user_id]:
+                old_task_id = self.user_tasks[user_id][bvid]
+                old_task = self.tasks.get(old_task_id)
+                # 如果旧任务未完成且未失败，返回旧任务
+                if old_task and old_task["status"] not in [self.STATUS_COMPLETED, self.STATUS_FAILED, self.STATUS_CANCELLED]:
+                    return old_task_id
+            
+            self.tasks[task_id] = {
+                "task_id": task_id,
+                "user_id": user_id,
+                "bvid": bvid,
+                "title": title or bvid,
+                "use_asr": use_asr,
+                "status": self.STATUS_PENDING,
+                "progress": 0,
+                "stage_desc": self.STAGE_DESC[self.STATUS_PENDING],
+                "transcript": None,
+                "transcript_with_timestamps": None,  # 带时间戳的字幕
+                "error": None,
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            
+            # 记录用户-视频-任务映射
+            if user_id not in self.user_tasks:
+                self.user_tasks[user_id] = {}
+            self.user_tasks[user_id][bvid] = task_id
+            
+        return task_id
+    
+    def update_task(self, task_id: str, status: str = None, progress: int = None, 
+                    transcript: str = None, transcript_with_timestamps: list = None,
+                    error: str = None):
+        """更新任务状态"""
+        with self.lock:
+            if task_id not in self.tasks:
+                return False
+            
+            task = self.tasks[task_id]
+            if status:
+                task["status"] = status
+                task["stage_desc"] = self.STAGE_DESC.get(status, status)
+            if progress is not None:
+                task["progress"] = progress
+            if transcript is not None:
+                task["transcript"] = transcript
+            if transcript_with_timestamps is not None:
+                task["transcript_with_timestamps"] = transcript_with_timestamps
+            if error:
+                task["error"] = error
+            task["updated_at"] = datetime.utcnow().isoformat()
+            return True
+    
+    def get_task(self, task_id: str) -> dict:
+        """获取任务信息"""
+        with self.lock:
+            return self.tasks.get(task_id, {}).copy()
+    
+    def get_task_by_bvid(self, user_id: int, bvid: str) -> dict:
+        """通过 bvid 获取用户的任务"""
+        with self.lock:
+            if user_id in self.user_tasks and bvid in self.user_tasks[user_id]:
+                task_id = self.user_tasks[user_id][bvid]
+                return self.tasks.get(task_id, {}).copy()
+            return {}
+    
+    def cancel_task(self, task_id: str) -> bool:
+        """取消任务"""
+        with self.lock:
+            if task_id not in self.tasks:
+                return False
+            task = self.tasks[task_id]
+            if task["status"] in [self.STATUS_COMPLETED, self.STATUS_FAILED]:
+                return False  # 已完成/失败的任务不能取消
+            task["status"] = self.STATUS_CANCELLED
+            task["stage_desc"] = self.STAGE_DESC[self.STATUS_CANCELLED]
+            task["updated_at"] = datetime.utcnow().isoformat()
+            return True
+    
+    def is_cancelled(self, task_id: str) -> bool:
+        """检查任务是否已取消"""
+        with self.lock:
+            task = self.tasks.get(task_id)
+            return task and task["status"] == self.STATUS_CANCELLED
+    
+    def cleanup_old_tasks(self, max_age_hours: int = 24):
+        """清理旧任务（可选，定期调用）"""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+        with self.lock:
+            to_delete = []
+            for task_id, task in self.tasks.items():
+                created = datetime.fromisoformat(task["created_at"])
+                if created < cutoff:
+                    to_delete.append(task_id)
+            for task_id in to_delete:
+                task = self.tasks.pop(task_id, None)
+                if task:
+                    user_id = task["user_id"]
+                    bvid = task["bvid"]
+                    if user_id in self.user_tasks and bvid in self.user_tasks[user_id]:
+                        del self.user_tasks[user_id][bvid]
+
+extension_task_manager = ExtensionTaskManager()
 
 class LogCollector:
     """日志收集器，用于收集处理过程中的日志，支持进度回调"""
@@ -3285,6 +3427,307 @@ def extension_llm_process():
             
     except Exception as e:
         logger.error(f"[extension] LLM 处理失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============ 插件异步任务 API ============
+
+@app.route('/api/extension/task/create', methods=['POST'])
+@extension_auth_required
+def extension_create_task():
+    """
+    创建异步字幕提取任务
+    
+    请求头: X-Extension-Token
+    请求体: {"bvid": "BVxxxxx", "title": "视频标题", "use_asr": false}
+    响应: {"success": true, "task_id": "uuid", "status": "pending"}
+    """
+    from flask import g
+    user = g.extension_user
+    
+    try:
+        data = request.get_json() or {}
+        bvid = data.get('bvid', '').strip()
+        title = data.get('title', '')
+        use_asr = data.get('use_asr', False)
+        
+        if not bvid:
+            return jsonify({'success': False, 'error': '缺少 bvid 参数'}), 400
+        
+        # 检查是否已有历史记录
+        from models import HistoryItem
+        history = HistoryItem.query.filter_by(user_id=user.id, bvid=bvid).first()
+        if history and history.transcript:
+            # 已有历史记录，直接返回
+            return jsonify({
+                'success': True,
+                'task_id': None,
+                'status': 'completed',
+                'from_history': True,
+                'transcript': history.transcript,
+                'ai_result': history.ai_result,
+                'title': history.title
+            })
+        
+        # 创建新任务
+        task_id = extension_task_manager.create_task(
+            user_id=user.id,
+            bvid=bvid,
+            title=title,
+            use_asr=use_asr
+        )
+        
+        # 获取任务状态（可能是复用的旧任务）
+        task = extension_task_manager.get_task(task_id)
+        
+        if task['status'] == extension_task_manager.STATUS_PENDING:
+            # 新任务，启动后台处理
+            executor.submit(
+                _extension_process_task,
+                task_id,
+                user.id,
+                bvid,
+                use_asr
+            )
+        
+        return jsonify({
+            'success': True,
+            'task_id': task_id,
+            'status': task['status'],
+            'progress': task['progress'],
+            'stage_desc': task['stage_desc']
+        })
+        
+    except Exception as e:
+        logger.error(f"[extension] 创建任务失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool):
+    """后台处理字幕提取任务"""
+    from models import User, HistoryItem
+    
+    with app.app_context():
+        try:
+            user = User.query.get(user_id)
+            if not user:
+                extension_task_manager.update_task(task_id, 
+                    status=ExtensionTaskManager.STATUS_FAILED,
+                    error="用户不存在")
+                return
+            
+            video_url = f"https://www.bilibili.com/video/{bvid}"
+            bili_cookie = user.bili_cookie
+            api_key = user.api_key
+            
+            log_collector = LogCollector()
+            transcript = None
+            source = None
+            
+            # 阶段 1：尝试获取 B站自带字幕
+            extension_task_manager.update_task(task_id,
+                status=ExtensionTaskManager.STATUS_DOWNLOADING,
+                progress=10)
+            
+            if bili_cookie:
+                try:
+                    transcript = get_bilibili_subtitles(video_url, log_collector, bili_cookie)
+                    if transcript:
+                        source = 'bilibili'
+                except Exception as e:
+                    logger.warning(f"[extension] 获取 B站字幕失败: {e}")
+            
+            # 阶段 2：如果没有字幕且允许语音识别
+            if not transcript and use_asr and api_key:
+                # 检查任务是否被取消
+                if extension_task_manager.is_cancelled(task_id):
+                    return
+                
+                extension_task_manager.update_task(task_id,
+                    status=ExtensionTaskManager.STATUS_DOWNLOADING,
+                    progress=20)
+                
+                try:
+                    # 下载音频
+                    audio_path, duration = download_bilibili_audio(video_url, AUDIO_DIR, log_collector)
+                    
+                    if extension_task_manager.is_cancelled(task_id):
+                        if os.path.exists(audio_path):
+                            os.remove(audio_path)
+                        return
+                    
+                    extension_task_manager.update_task(task_id,
+                        status=ExtensionTaskManager.STATUS_UPLOADING,
+                        progress=35)
+                    
+                    # 语音识别
+                    use_self_hosted = user.use_self_hosted
+                    self_hosted_domain = user.self_hosted_domain if use_self_hosted else None
+                    
+                    extension_task_manager.update_task(task_id,
+                        status=ExtensionTaskManager.STATUS_TRANSCRIBING,
+                        progress=50)
+                    
+                    transcript = transcribe_audio(
+                        audio_path, api_key, log_collector,
+                        self_hosted_domain=self_hosted_domain,
+                        duration=duration
+                    )
+                    
+                    if transcript:
+                        source = 'asr'
+                    
+                    # 清理音频文件
+                    if os.path.exists(audio_path):
+                        os.remove(audio_path)
+                        
+                except Exception as e:
+                    logger.error(f"[extension] 语音识别失败: {e}")
+            
+            # 阶段 3：处理结果
+            extension_task_manager.update_task(task_id,
+                status=ExtensionTaskManager.STATUS_PROCESSING,
+                progress=90)
+            
+            if transcript:
+                # 保存到历史记录
+                try:
+                    history = HistoryItem.query.filter_by(user_id=user_id, bvid=bvid).first()
+                    if history:
+                        history.transcript = transcript
+                        history.updated_at = datetime.utcnow()
+                    else:
+                        # 获取视频标题
+                        title = extension_task_manager.get_task(task_id).get('title', bvid)
+                        history = HistoryItem(
+                            user_id=user_id,
+                            url=f"https://www.bilibili.com/video/{bvid}",
+                            bvid=bvid,
+                            title=title,
+                            transcript=transcript
+                        )
+                        db.session.add(history)
+                    db.session.commit()
+                except Exception as e:
+                    logger.error(f"[extension] 保存历史记录失败: {e}")
+                    db.session.rollback()
+                
+                extension_task_manager.update_task(task_id,
+                    status=ExtensionTaskManager.STATUS_COMPLETED,
+                    progress=100,
+                    transcript=transcript)
+                logger.info(f"[extension] 任务完成: {bvid}")
+            else:
+                extension_task_manager.update_task(task_id,
+                    status=ExtensionTaskManager.STATUS_FAILED,
+                    progress=100,
+                    error="未能获取字幕")
+                    
+        except Exception as e:
+            logger.error(f"[extension] 任务处理失败: {e}")
+            extension_task_manager.update_task(task_id,
+                status=ExtensionTaskManager.STATUS_FAILED,
+                error=str(e))
+
+
+@app.route('/api/extension/task/<task_id>', methods=['GET'])
+@extension_auth_required
+def extension_get_task(task_id):
+    """
+    查询任务状态
+    
+    响应: {"success": true, "task": {...}}
+    """
+    task = extension_task_manager.get_task(task_id)
+    if not task:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+    
+    return jsonify({
+        'success': True,
+        'task': task
+    })
+
+
+@app.route('/api/extension/task/<task_id>/cancel', methods=['POST'])
+@extension_auth_required
+def extension_cancel_task(task_id):
+    """取消任务"""
+    success = extension_task_manager.cancel_task(task_id)
+    return jsonify({'success': success})
+
+
+@app.route('/api/extension/history/<bvid>', methods=['GET'])
+@extension_auth_required
+def extension_check_history(bvid):
+    """
+    检查该视频是否有历史记录
+    
+    响应: {"exists": true, "transcript": "...", "ai_result": "...", "title": "..."}
+    """
+    from flask import g
+    from models import HistoryItem
+    
+    user = g.extension_user
+    history = HistoryItem.query.filter_by(user_id=user.id, bvid=bvid).first()
+    
+    if history and history.transcript:
+        return jsonify({
+            'success': True,
+            'exists': True,
+            'transcript': history.transcript,
+            'ai_result': history.ai_result,
+            'title': history.title,
+            'updated_at': history.updated_at.isoformat() if history.updated_at else None
+        })
+    else:
+        # 检查是否有正在进行的任务
+        task = extension_task_manager.get_task_by_bvid(user.id, bvid)
+        if task and task.get('status') not in [ExtensionTaskManager.STATUS_COMPLETED, 
+                                                 ExtensionTaskManager.STATUS_FAILED,
+                                                 ExtensionTaskManager.STATUS_CANCELLED]:
+            return jsonify({
+                'success': True,
+                'exists': False,
+                'has_pending_task': True,
+                'task_id': task.get('task_id'),
+                'status': task.get('status'),
+                'progress': task.get('progress'),
+                'stage_desc': task.get('stage_desc')
+            })
+        
+        return jsonify({
+            'success': True,
+            'exists': False,
+            'has_pending_task': False
+        })
+
+
+@app.route('/api/extension/history/<bvid>/ai', methods=['POST'])
+@extension_auth_required
+def extension_save_ai_result(bvid):
+    """
+    保存 AI 对话结果到历史记录
+    
+    请求体: {"ai_result": "对话内容"}
+    """
+    from flask import g
+    from models import HistoryItem
+    
+    user = g.extension_user
+    data = request.get_json() or {}
+    ai_result = data.get('ai_result', '')
+    
+    history = HistoryItem.query.filter_by(user_id=user.id, bvid=bvid).first()
+    if not history:
+        return jsonify({'success': False, 'error': '历史记录不存在'}), 404
+    
+    try:
+        history.ai_result = ai_result
+        history.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
