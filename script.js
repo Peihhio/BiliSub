@@ -4195,24 +4195,28 @@ function renderExtensionTasks(tasks) {
         countEl.textContent = countText || '无任务';
     }
 
-    // 渲染卡片
+    // 渲染卡片（使用与批处理一致的结构）
     grid.innerHTML = visibleTasks.map(task => {
-        const stageText = getStageText(task.status);
         const isFailed = task.status === 'failed';
-        const cardClass = isFailed ? 'extension-task-card failed' : 'extension-task-card';
-        const progressClass = isFailed ? 'extension-task-progress-fill failed' : 'extension-task-progress-fill';
+        const statusClass = isFailed ? 'status-error' : '';
+        const progressWidth = isFailed ? 100 : task.progress;
+
+        // 构建状态文本（包含百分比）
+        let statusText = '';
+        if (isFailed) {
+            statusText = '❌ ' + (task.error || '处理失败');
+        } else {
+            statusText = `${task.stage_desc || getStageText(task.status)} ${task.progress}%`;
+        }
 
         return `
-            <div class="${cardClass}" data-bvid="${task.bvid}">
-                <div class="extension-task-title" title="${escapeHtml(task.title)}">${escapeHtml(task.title || task.bvid)}</div>
-                <div class="extension-task-progress">
-                    <div class="extension-task-progress-bar">
-                        <div class="${progressClass}" style="width: ${isFailed ? 100 : task.progress}%"></div>
-                    </div>
+            <div class="batch-video-item ${statusClass}" data-bvid="${task.bvid}">
+                <div class="video-info">
+                    <span class="video-title" title="${escapeHtml(task.title)}">${escapeHtml(task.title || task.bvid)}</span>
+                    <span class="video-status">${statusText}</span>
                 </div>
-                <div class="extension-task-status">
-                    <span>${isFailed ? (task.error || '处理失败') : (task.stage_desc || stageText)}</span>
-                    <span class="extension-task-percent ${isFailed ? 'failed' : ''}">${isFailed ? '❌' : task.progress + '%'}</span>
+                <div class="mini-progress-bar">
+                    <div class="bar" style="width: ${progressWidth}%"></div>
                 </div>
             </div>
         `;

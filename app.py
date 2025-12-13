@@ -3646,10 +3646,13 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
     """后台处理字幕提取任务"""
     from models import User, HistoryItem
     
+    logger.info(f"[extension] 开始处理任务: task_id={task_id}, bvid={bvid}, use_asr={use_asr}")
+    
     with app.app_context():
         try:
             user = User.query.get(user_id)
             if not user:
+                logger.error(f"[extension] 用户不存在: user_id={user_id}")
                 extension_task_manager.update_task(task_id, 
                     status=ExtensionTaskManager.STATUS_FAILED,
                     error="用户不存在")
@@ -3659,53 +3662,85 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
             bili_cookie = user.bili_cookie
             api_key = user.api_key
             
+            # 自定义进度回调
+            def update_progress(progress, stage_desc=None):
+                extension_task_manager.update_task(task_id, progress=progress, 
+                    stage_desc=stage_desc if stage_desc else None)
+            
             log_collector = LogCollector()
             transcript = None
             source = None
             
-            # 阶段 1：尝试获取 B站自带字幕
+            # 阶段 1：尝试获取 B站自带字幕 (0-15%)
+            logger.info(f"[extension] [{bvid}] 阶段1: 尝试获取 B站自带字幕")
             extension_task_manager.update_task(task_id,
                 status=ExtensionTaskManager.STATUS_DOWNLOADING,
-                progress=10)
+                progress=5,
+                stage_desc="检查B站字幕")
             
             if bili_cookie:
                 try:
+                    update_progress(8, "获取视频信息")
                     transcript = get_bilibili_subtitles(video_url, log_collector, bili_cookie)
                     if transcript:
                         source = 'bilibili'
+                        logger.info(f"[extension] [{bvid}] 成功获取 B站自带字幕，长度: {len(transcript)}")
                 except Exception as e:
-                    logger.warning(f"[extension] 获取 B站字幕失败: {e}")
+                    logger.warning(f"[extension] [{bvid}] 获取 B站字幕失败: {e}")
             
-            # 阶段 2：如果没有字幕且允许语音识别
+            update_progress(15, "字幕检查完成")
+            
+            # 阶段 2：如果没有字幕且允许语音识别 (15-90%)
             if not transcript and use_asr and api_key:
+                logger.info(f"[extension] [{bvid}] 阶段2: 开始语音识别")
+                
                 # 检查任务是否被取消
                 if extension_task_manager.is_cancelled(task_id):
+                    logger.info(f"[extension] [{bvid}] 任务已取消")
                     return
                 
-                extension_task_manager.update_task(task_id,
-                    status=ExtensionTaskManager.STATUS_DOWNLOADING,
-                    progress=20)
-                
                 try:
-                    # 下载音频
+                    # 下载音频 (15-35%)
+                    extension_task_manager.update_task(task_id,
+                        status=ExtensionTaskManager.STATUS_DOWNLOADING,
+                        progress=18,
+                        stage_desc="下载音频")
+                    
+                    logger.info(f"[extension] [{bvid}] 开始下载音频")
                     audio_path, duration = download_bilibili_audio(video_url, AUDIO_DIR, log_collector)
+                    logger.info(f"[extension] [{bvid}] 音频下载完成: {audio_path}, 时长: {duration}秒")
                     
                     if extension_task_manager.is_cancelled(task_id):
                         if os.path.exists(audio_path):
                             os.remove(audio_path)
                         return
                     
+                    update_progress(35, "音频下载完成")
+                    
+                    # 上传/准备 (35-45%)
                     extension_task_manager.update_task(task_id,
                         status=ExtensionTaskManager.STATUS_UPLOADING,
-                        progress=35)
+                        progress=40,
+                        stage_desc="准备上传")
                     
-                    # 语音识别
+                    # 语音识别 (45-90%)
                     use_self_hosted = user.use_self_hosted
                     self_hosted_domain = user.self_hosted_domain if use_self_hosted else None
                     
                     extension_task_manager.update_task(task_id,
                         status=ExtensionTaskManager.STATUS_TRANSCRIBING,
-                        progress=50)
+                        progress=48,
+                        stage_desc="语音识别中")
+                    
+                    logger.info(f"[extension] [{bvid}] 开始语音识别，self_hosted={use_self_hosted}")
+                    
+                    # 创建带进度回调的日志收集器
+                    def transcribe_progress_callback(stage, progress_pct):
+                        # 映射到 48-88% 区间
+                        mapped_progress = 48 + int(progress_pct * 0.4)
+                        update_progress(mapped_progress, f"语音识别 {int(progress_pct)}%")
+                    
+                    log_collector.progress_callback = transcribe_progress_callback
                     
                     transcript = transcribe_audio(
                         audio_path, api_key, log_collector,
@@ -3715,18 +3750,31 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                     
                     if transcript:
                         source = 'asr'
+                        logger.info(f"[extension] [{bvid}] 语音识别完成，长度: {len(transcript)}")
+                    else:
+                        logger.warning(f"[extension] [{bvid}] 语音识别返回空结果")
                     
                     # 清理音频文件
                     if os.path.exists(audio_path):
                         os.remove(audio_path)
+                        logger.info(f"[extension] [{bvid}] 临时音频已清理")
                         
                 except Exception as e:
-                    logger.error(f"[extension] 语音识别失败: {e}")
+                    logger.error(f"[extension] [{bvid}] 语音识别失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    extension_task_manager.update_task(task_id,
+                        status=ExtensionTaskManager.STATUS_FAILED,
+                        progress=100,
+                        error=f"语音识别失败: {str(e)}")
+                    return
             
-            # 阶段 3：处理结果
+            # 阶段 3：处理结果 (90-100%)
+            logger.info(f"[extension] [{bvid}] 阶段3: 处理结果")
             extension_task_manager.update_task(task_id,
                 status=ExtensionTaskManager.STATUS_PROCESSING,
-                progress=90)
+                progress=92,
+                stage_desc="保存结果")
             
             if transcript:
                 # 保存到历史记录
@@ -3735,8 +3783,10 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                     if history:
                         history.transcript = transcript
                         history.updated_at = datetime.utcnow()
+                        logger.info(f"[extension] [{bvid}] 更新历史记录")
                     else:
                         # 获取视频详细信息（包括封面）
+                        update_progress(95, "获取视频信息")
                         video_info = get_video_info_from_bilibili(bvid) or {}
                         title = video_info.get('title') or extension_task_manager.get_task(task_id).get('title', bvid)
                         
@@ -3746,33 +3796,40 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                             bvid=bvid,
                             title=title,
                             owner=video_info.get('owner', ''),
-                            cover=video_info.get('pic', ''),  # 封面 URL
+                            cover=video_info.get('pic', ''),
                             duration=video_info.get('duration', 0),
                             pubdate=video_info.get('pubdate', 0),
                             transcript=transcript
                         )
                         db.session.add(history)
+                        logger.info(f"[extension] [{bvid}] 创建新历史记录")
                     db.session.commit()
                 except Exception as e:
-                    logger.error(f"[extension] 保存历史记录失败: {e}")
+                    logger.error(f"[extension] [{bvid}] 保存历史记录失败: {e}")
                     db.session.rollback()
                 
                 extension_task_manager.update_task(task_id,
                     status=ExtensionTaskManager.STATUS_COMPLETED,
                     progress=100,
-                    transcript=transcript)
-                logger.info(f"[extension] 任务完成: {bvid}")
+                    transcript=transcript,
+                    stage_desc="完成")
+                logger.info(f"[extension] [{bvid}] ✅ 任务完成!")
             else:
+                error_msg = "未能获取字幕（视频无字幕且语音识别失败）"
+                logger.warning(f"[extension] [{bvid}] {error_msg}")
                 extension_task_manager.update_task(task_id,
                     status=ExtensionTaskManager.STATUS_FAILED,
                     progress=100,
-                    error="未能获取字幕")
+                    error=error_msg)
                     
         except Exception as e:
-            logger.error(f"[extension] 任务处理失败: {e}")
+            logger.error(f"[extension] [{bvid}] 任务处理失败: {e}")
+            import traceback
+            traceback.print_exc()
             extension_task_manager.update_task(task_id,
                 status=ExtensionTaskManager.STATUS_FAILED,
                 error=str(e))
+
 
 
 @app.route('/api/extension/task/<task_id>', methods=['GET'])
