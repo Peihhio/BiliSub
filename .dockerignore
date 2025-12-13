@@ -45,3 +45,5 @@ docs/
 *.bak
 *.tmp
 *.temp
+publish_docker.sh
+docker-compose.yml
