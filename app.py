@@ -273,7 +273,7 @@ task_manager = TaskManager()
 class ExtensionTaskManager:
     """
     Chrome 插件专用任务管理器
-    用于管理单个视频的异步字幕提取任务
+    使用数据库持久化 + 内存缓存
     """
     
     # 任务状态常量
@@ -299,23 +299,97 @@ class ExtensionTaskManager:
     }
     
     def __init__(self):
-        self.tasks = {}  # task_id -> task_info
+        self.tasks = {}  # 内存缓存: task_id -> task_info
         self.user_tasks = {}  # user_id -> {bvid -> task_id}
         self.lock = threading.Lock()
+    
+    def _sync_to_db(self, task_id: str, task: dict):
+        """将任务状态同步到数据库"""
+        try:
+            from models import ExtensionTask, db
+            with app.app_context():
+                db_task = ExtensionTask.query.filter_by(task_id=task_id).first()
+                if db_task:
+                    db_task.status = task.get('status', 'pending')
+                    db_task.progress = task.get('progress', 0)
+                    db_task.stage_desc = task.get('stage_desc', '')
+                    db_task.error = task.get('error')
+                    db_task.transcript = task.get('transcript')
+                else:
+                    db_task = ExtensionTask(
+                        task_id=task_id,
+                        user_id=task['user_id'],
+                        bvid=task['bvid'],
+                        title=task.get('title', task['bvid']),
+                        status=task.get('status', 'pending'),
+                        progress=task.get('progress', 0),
+                        stage_desc=task.get('stage_desc', '等待处理')
+                    )
+                    db.session.add(db_task)
+                db.session.commit()
+        except Exception as e:
+            logger.error(f"[ExtensionTask] 数据库同步失败: {e}")
+    
+    def _load_from_db(self, task_id: str = None, user_id: int = None, bvid: str = None) -> dict:
+        """从数据库加载任务"""
+        try:
+            from models import ExtensionTask
+            with app.app_context():
+                if task_id:
+                    db_task = ExtensionTask.query.filter_by(task_id=task_id).first()
+                elif user_id and bvid:
+                    # 查找用户该视频最新的未完成任务
+                    db_task = ExtensionTask.query.filter_by(
+                        user_id=user_id, bvid=bvid
+                    ).filter(
+                        ExtensionTask.status.notin_([self.STATUS_COMPLETED, self.STATUS_FAILED, self.STATUS_CANCELLED])
+                    ).order_by(ExtensionTask.created_at.desc()).first()
+                else:
+                    return {}
+                
+                if db_task:
+                    return {
+                        'task_id': db_task.task_id,
+                        'user_id': db_task.user_id,
+                        'bvid': db_task.bvid,
+                        'title': db_task.title,
+                        'status': db_task.status,
+                        'progress': db_task.progress,
+                        'stage_desc': db_task.stage_desc or self.STAGE_DESC.get(db_task.status, ''),
+                        'transcript': db_task.transcript,
+                        'error': db_task.error,
+                        'created_at': db_task.created_at.isoformat() if db_task.created_at else None,
+                        'updated_at': db_task.updated_at.isoformat() if db_task.updated_at else None
+                    }
+        except Exception as e:
+            logger.error(f"[ExtensionTask] 数据库加载失败: {e}")
+        return {}
     
     def create_task(self, user_id: int, bvid: str, title: str = None, use_asr: bool = False) -> str:
         """创建新任务，返回任务ID"""
         task_id = str(uuid.uuid4())
+        now = datetime.utcnow()
+        
         with self.lock:
-            # 检查该用户是否已有该视频的任务
+            # 检查是否已有该视频的进行中任务（先查内存，再查数据库）
             if user_id in self.user_tasks and bvid in self.user_tasks[user_id]:
                 old_task_id = self.user_tasks[user_id][bvid]
                 old_task = self.tasks.get(old_task_id)
-                # 如果旧任务未完成且未失败，返回旧任务
                 if old_task and old_task["status"] not in [self.STATUS_COMPLETED, self.STATUS_FAILED, self.STATUS_CANCELLED]:
                     return old_task_id
             
-            self.tasks[task_id] = {
+            # 再查数据库
+            db_task = self._load_from_db(user_id=user_id, bvid=bvid)
+            if db_task and db_task.get('status') not in [self.STATUS_COMPLETED, self.STATUS_FAILED, self.STATUS_CANCELLED]:
+                # 恢复到内存缓存
+                self.tasks[db_task['task_id']] = db_task
+                if user_id not in self.user_tasks:
+                    self.user_tasks[user_id] = {}
+                self.user_tasks[user_id][bvid] = db_task['task_id']
+                return db_task['task_id']
+            
+            # 创建新任务
+            task_info = {
                 "task_id": task_id,
                 "user_id": user_id,
                 "bvid": bvid,
@@ -325,26 +399,38 @@ class ExtensionTaskManager:
                 "progress": 0,
                 "stage_desc": self.STAGE_DESC[self.STATUS_PENDING],
                 "transcript": None,
-                "transcript_with_timestamps": None,  # 带时间戳的字幕
+                "transcript_with_timestamps": None,
                 "error": None,
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat()
             }
             
-            # 记录用户-视频-任务映射
+            self.tasks[task_id] = task_info
+            
             if user_id not in self.user_tasks:
                 self.user_tasks[user_id] = {}
             self.user_tasks[user_id][bvid] = task_id
-            
+        
+        # 同步到数据库（异步，不阻塞）
+        try:
+            self._sync_to_db(task_id, task_info)
+        except Exception as e:
+            logger.error(f"[ExtensionTask] 创建任务时数据库同步失败: {e}")
+        
         return task_id
     
     def update_task(self, task_id: str, status: str = None, progress: int = None, 
                     transcript: str = None, transcript_with_timestamps: list = None,
                     error: str = None):
-        """更新任务状态"""
+        """更新任务状态并同步到数据库"""
         with self.lock:
             if task_id not in self.tasks:
-                return False
+                # 尝试从数据库加载
+                db_task = self._load_from_db(task_id=task_id)
+                if db_task:
+                    self.tasks[task_id] = db_task
+                else:
+                    return False
             
             task = self.tasks[task_id]
             if status:
@@ -359,59 +445,112 @@ class ExtensionTaskManager:
             if error:
                 task["error"] = error
             task["updated_at"] = datetime.utcnow().isoformat()
-            return True
+        
+        # 同步到数据库
+        try:
+            self._sync_to_db(task_id, task)
+        except Exception as e:
+            logger.error(f"[ExtensionTask] 更新任务时数据库同步失败: {e}")
+        
+        return True
     
     def get_task(self, task_id: str) -> dict:
-        """获取任务信息"""
+        """获取任务信息（先查内存，再查数据库）"""
         with self.lock:
-            return self.tasks.get(task_id, {}).copy()
+            if task_id in self.tasks:
+                return self.tasks[task_id].copy()
+        
+        # 查数据库
+        return self._load_from_db(task_id=task_id)
     
     def get_task_by_bvid(self, user_id: int, bvid: str) -> dict:
         """通过 bvid 获取用户的任务"""
         with self.lock:
             if user_id in self.user_tasks and bvid in self.user_tasks[user_id]:
                 task_id = self.user_tasks[user_id][bvid]
-                return self.tasks.get(task_id, {}).copy()
-            return {}
+                if task_id in self.tasks:
+                    return self.tasks[task_id].copy()
+        
+        # 查数据库
+        return self._load_from_db(user_id=user_id, bvid=bvid)
+    
+    def get_user_tasks(self, user_id: int) -> list:
+        """获取用户所有进行中的任务（从数据库）"""
+        try:
+            from models import ExtensionTask
+            with app.app_context():
+                tasks = ExtensionTask.query.filter_by(user_id=user_id).filter(
+                    ExtensionTask.status.notin_([self.STATUS_COMPLETED, self.STATUS_FAILED, self.STATUS_CANCELLED])
+                ).order_by(ExtensionTask.created_at.desc()).all()
+                return [t.to_dict() for t in tasks]
+        except Exception as e:
+            logger.error(f"[ExtensionTask] 获取用户任务失败: {e}")
+        return []
+    
+    def get_user_all_tasks(self, user_id: int, limit: int = 20) -> list:
+        """获取用户所有任务（包括已完成和失败的，用于调试）"""
+        try:
+            from models import ExtensionTask
+            with app.app_context():
+                tasks = ExtensionTask.query.filter_by(user_id=user_id).order_by(
+                    ExtensionTask.created_at.desc()
+                ).limit(limit).all()
+                return [t.to_dict() for t in tasks]
+        except Exception as e:
+            logger.error(f"[ExtensionTask] 获取用户所有任务失败: {e}")
+        return []
     
     def cancel_task(self, task_id: str) -> bool:
         """取消任务"""
         with self.lock:
             if task_id not in self.tasks:
+                # 尝试从数据库加载
+                db_task = self._load_from_db(task_id=task_id)
+                if db_task:
+                    self.tasks[task_id] = db_task
+                else:
+                    return False
+                    
+            task = self.tasks.get(task_id)
+            if not task:
                 return False
-            task = self.tasks[task_id]
             if task["status"] in [self.STATUS_COMPLETED, self.STATUS_FAILED]:
-                return False  # 已完成/失败的任务不能取消
+                return False
             task["status"] = self.STATUS_CANCELLED
             task["stage_desc"] = self.STAGE_DESC[self.STATUS_CANCELLED]
             task["updated_at"] = datetime.utcnow().isoformat()
-            return True
+        
+        # 同步到数据库
+        try:
+            self._sync_to_db(task_id, task)
+        except Exception as e:
+            logger.error(f"[ExtensionTask] 取消任务时数据库同步失败: {e}")
+        
+        return True
     
     def is_cancelled(self, task_id: str) -> bool:
         """检查任务是否已取消"""
-        with self.lock:
-            task = self.tasks.get(task_id)
-            return task and task["status"] == self.STATUS_CANCELLED
+        task = self.get_task(task_id)
+        return task and task.get("status") == self.STATUS_CANCELLED
     
     def cleanup_old_tasks(self, max_age_hours: int = 24):
-        """清理旧任务（可选，定期调用）"""
+        """清理旧任务（从数据库）"""
         from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
-        with self.lock:
-            to_delete = []
-            for task_id, task in self.tasks.items():
-                created = datetime.fromisoformat(task["created_at"])
-                if created < cutoff:
-                    to_delete.append(task_id)
-            for task_id in to_delete:
-                task = self.tasks.pop(task_id, None)
-                if task:
-                    user_id = task["user_id"]
-                    bvid = task["bvid"]
-                    if user_id in self.user_tasks and bvid in self.user_tasks[user_id]:
-                        del self.user_tasks[user_id][bvid]
+        try:
+            from models import ExtensionTask, db
+            cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+            with app.app_context():
+                # 删除已完成/失败/取消的旧任务
+                ExtensionTask.query.filter(
+                    ExtensionTask.created_at < cutoff,
+                    ExtensionTask.status.in_([self.STATUS_COMPLETED, self.STATUS_FAILED, self.STATUS_CANCELLED])
+                ).delete(synchronize_session=False)
+                db.session.commit()
+        except Exception as e:
+            logger.error(f"[ExtensionTask] 清理旧任务失败: {e}")
 
 extension_task_manager = ExtensionTaskManager()
+
 
 class LogCollector:
     """日志收集器，用于收集处理过程中的日志，支持进度回调"""
@@ -3666,32 +3805,28 @@ def extension_cancel_task(task_id):
 @login_required
 def get_extension_tasks():
     """
-    获取当前用户的所有插件任务（用于网站显示）
+    获取当前用户的所有进行中插件任务（用于网站显示）
     
     响应: {"success": true, "tasks": [...]}
     """
-    user_id = current_user.id
+    tasks = extension_task_manager.get_user_tasks(current_user.id)
     
-    # 从 ExtensionTaskManager 获取该用户的所有任务
-    tasks = []
-    with extension_task_manager.lock:
-        if user_id in extension_task_manager.user_tasks:
-            for bvid, task_id in extension_task_manager.user_tasks[user_id].items():
-                task = extension_task_manager.tasks.get(task_id)
-                if task and task['status'] not in [
-                    ExtensionTaskManager.STATUS_COMPLETED,
-                    ExtensionTaskManager.STATUS_FAILED,
-                    ExtensionTaskManager.STATUS_CANCELLED
-                ]:
-                    tasks.append({
-                        'task_id': task['task_id'],
-                        'bvid': task['bvid'],
-                        'title': task['title'],
-                        'status': task['status'],
-                        'progress': task['progress'],
-                        'stage_desc': task['stage_desc'],
-                        'created_at': task['created_at']
-                    })
+    return jsonify({
+        'success': True,
+        'tasks': tasks
+    })
+
+
+@app.route('/api/extension/tasks/all', methods=['GET'])
+@login_required
+def get_extension_tasks_all():
+    """
+    获取当前用户的所有插件任务（包括已完成和失败的，用于调试）
+    
+    响应: {"success": true, "tasks": [...]}
+    """
+    limit = request.args.get('limit', 20, type=int)
+    tasks = extension_task_manager.get_user_all_tasks(current_user.id, limit=limit)
     
     return jsonify({
         'success': True,

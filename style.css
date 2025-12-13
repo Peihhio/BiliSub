@@ -3303,3 +3303,17 @@ body {
     font-weight: 500;
     color: var(--accent-primary);
 }
+
+/* 失败任务样式 */
+.extension-task-card.failed {
+    border-color: var(--error);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.extension-task-progress-fill.failed {
+    background: linear-gradient(90deg, var(--error) 0%, #f87171 100%);
+}
+
+.extension-task-percent.failed {
+    color: var(--error);
+}

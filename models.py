@@ -115,6 +115,48 @@ class HistoryItem(db.Model):
         }
 
 
+class ExtensionTask(db.Model):
+    """Chrome 插件任务模型 - 持久化任务状态"""
+    __tablename__ = 'extension_tasks'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.String(40), unique=True, nullable=False, index=True)  # UUID
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), 
+                        nullable=False, index=True)
+    bvid = db.Column(db.String(50), nullable=False, index=True)
+    title = db.Column(db.String(500), nullable=True)
+    
+    # 任务状态
+    status = db.Column(db.String(20), nullable=False, default='pending')
+    progress = db.Column(db.Integer, default=0)
+    stage_desc = db.Column(db.String(100), nullable=True)
+    error = db.Column(db.Text, nullable=True)
+    
+    # 结果
+    transcript = db.Column(db.Text, nullable=True)
+    
+    # 时间戳
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 用户关联
+    user = db.relationship('User', backref=db.backref('extension_tasks', lazy='dynamic'))
+    
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            'task_id': self.task_id,
+            'bvid': self.bvid,
+            'title': self.title,
+            'status': self.status,
+            'progress': self.progress,
+            'stage_desc': self.stage_desc,
+            'error': self.error,
+            'transcript': self.transcript,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
 class SystemConfig(db.Model):
     """系统配置模型（存储邀请码等）"""
     __tablename__ = 'system_config'

@@ -4137,7 +4137,8 @@ async function fetchExtensionTasks() {
     if (isGuestUser) return; // Guest 用户不支持插件
 
     try {
-        const response = await fetch('/api/extension/tasks');
+        // 获取所有任务（包括失败的，用于显示错误）
+        const response = await fetch('/api/extension/tasks/all?limit=10');
         const data = await response.json();
 
         if (data.success) {
@@ -4158,8 +4159,23 @@ function renderExtensionTasks(tasks) {
 
     if (!section || !grid) return;
 
+    // 过滤显示：进行中的任务 + 最近1小时内失败的任务
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const visibleTasks = tasks.filter(task => {
+        // 进行中的任务始终显示
+        if (!['completed', 'failed', 'cancelled'].includes(task.status)) {
+            return true;
+        }
+        // 失败的任务：1小时内显示
+        if (task.status === 'failed' && task.created_at) {
+            const createdAt = new Date(task.created_at);
+            return createdAt > oneHourAgo;
+        }
+        return false;
+    });
+
     // 如果没有任务，隐藏区域
-    if (!tasks || tasks.length === 0) {
+    if (!visibleTasks || visibleTasks.length === 0) {
         section.style.display = 'none';
         return;
     }
@@ -4167,25 +4183,36 @@ function renderExtensionTasks(tasks) {
     // 显示区域
     section.style.display = 'block';
 
+    // 统计进行中和失败的任务
+    const inProgress = visibleTasks.filter(t => !['completed', 'failed', 'cancelled'].includes(t.status)).length;
+    const failed = visibleTasks.filter(t => t.status === 'failed').length;
+
     // 更新计数
     if (countEl) {
-        countEl.textContent = `${tasks.length} 个进行中`;
+        let countText = '';
+        if (inProgress > 0) countText += `${inProgress} 个进行中`;
+        if (failed > 0) countText += (countText ? '，' : '') + `${failed} 个失败`;
+        countEl.textContent = countText || '无任务';
     }
 
     // 渲染卡片
-    grid.innerHTML = tasks.map(task => {
+    grid.innerHTML = visibleTasks.map(task => {
         const stageText = getStageText(task.status);
+        const isFailed = task.status === 'failed';
+        const cardClass = isFailed ? 'extension-task-card failed' : 'extension-task-card';
+        const progressClass = isFailed ? 'extension-task-progress-fill failed' : 'extension-task-progress-fill';
+
         return `
-            <div class="extension-task-card" data-bvid="${task.bvid}">
+            <div class="${cardClass}" data-bvid="${task.bvid}">
                 <div class="extension-task-title" title="${escapeHtml(task.title)}">${escapeHtml(task.title || task.bvid)}</div>
                 <div class="extension-task-progress">
                     <div class="extension-task-progress-bar">
-                        <div class="extension-task-progress-fill" style="width: ${task.progress}%"></div>
+                        <div class="${progressClass}" style="width: ${isFailed ? 100 : task.progress}%"></div>
                     </div>
                 </div>
                 <div class="extension-task-status">
-                    <span>${task.stage_desc || stageText}</span>
-                    <span class="extension-task-percent">${task.progress}%</span>
+                    <span>${isFailed ? (task.error || '处理失败') : (task.stage_desc || stageText)}</span>
+                    <span class="extension-task-percent ${isFailed ? 'failed' : ''}">${isFailed ? '❌' : task.progress + '%'}</span>
                 </div>
             </div>
         `;
