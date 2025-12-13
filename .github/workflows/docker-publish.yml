@@ -65,3 +65,23 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 7. 自动创建 GitHub Release
+      # 这样您在 GitHub 首页右侧就能看到最新的版本号，不用自己记
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          generate_release_notes: true # 自动生成更新日志
+
+      # 8. 自动同步 README 到 DockerHub
+      # 让 DockerHub 的介绍页面与 GitHub README 保持一致
+      - name: Update Docker Hub Description
+        uses: peter-evans/dockerhub-description@v3
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.IMAGE_NAME }}
+
+
