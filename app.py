@@ -3130,18 +3130,18 @@ def extension_get_subtitle():
                 # 下载音频并转录
                 audio_path, duration = download_bilibili_audio(video_url, AUDIO_DIR, log_collector)
                 
-                # 根据模式选择处理方式
+                # 使用 transcribe_audio 进行语音识别
+                # 该函数内部会根据 self_hosted_domain 自动选择本地直链或第三方服务
                 use_self_hosted = user.use_self_hosted
-                self_hosted_domain = user.self_hosted_domain
+                self_hosted_domain = user.self_hosted_domain if use_self_hosted else None
                 
-                if use_self_hosted and self_hosted_domain:
-                    # 使用本地直链
-                    transcript = transcribe_with_self_hosted(
-                        audio_path, api_key, self_hosted_domain, log_collector
-                    )
-                else:
-                    # 使用第三方直链
-                    transcript = transcribe_with_third_party(audio_path, api_key, log_collector)
+                transcript = transcribe_audio(
+                    audio_path, 
+                    api_key, 
+                    log_collector, 
+                    self_hosted_domain=self_hosted_domain,
+                    duration=duration
+                )
                 
                 if transcript:
                     source = 'asr'
