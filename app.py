@@ -3005,6 +3005,29 @@ def extension_auth_required(f):
     return decorated_function
 
 
+@app.route('/api/extension/ping', methods=['GET'])
+@extension_auth_required
+def extension_ping():
+    """
+    简单的连接测试 API（用于插件检测连接状态）
+    
+    请求头:
+        X-Extension-Token: 插件令牌
+    
+    响应:
+        {"success": true, "message": "已连接", "user": "用户名"}
+    """
+    from flask import g
+    user = g.extension_user
+    
+    return jsonify({
+        'success': True,
+        'message': '已连接',
+        'user': user.username,
+        'last_sync': user.extension_last_sync.isoformat() if user.extension_last_sync else None
+    })
+
+
 @app.route('/api/extension/sync-cookie', methods=['POST'])
 @extension_auth_required
 def extension_sync_cookie():
