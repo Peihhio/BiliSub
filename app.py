@@ -3662,6 +3662,42 @@ def extension_cancel_task(task_id):
     return jsonify({'success': success})
 
 
+@app.route('/api/extension/tasks', methods=['GET'])
+@login_required
+def get_extension_tasks():
+    """
+    获取当前用户的所有插件任务（用于网站显示）
+    
+    响应: {"success": true, "tasks": [...]}
+    """
+    user_id = current_user.id
+    
+    # 从 ExtensionTaskManager 获取该用户的所有任务
+    tasks = []
+    with extension_task_manager.lock:
+        if user_id in extension_task_manager.user_tasks:
+            for bvid, task_id in extension_task_manager.user_tasks[user_id].items():
+                task = extension_task_manager.tasks.get(task_id)
+                if task and task['status'] not in [
+                    ExtensionTaskManager.STATUS_COMPLETED,
+                    ExtensionTaskManager.STATUS_FAILED,
+                    ExtensionTaskManager.STATUS_CANCELLED
+                ]:
+                    tasks.append({
+                        'task_id': task['task_id'],
+                        'bvid': task['bvid'],
+                        'title': task['title'],
+                        'status': task['status'],
+                        'progress': task['progress'],
+                        'stage_desc': task['stage_desc'],
+                        'created_at': task['created_at']
+                    })
+    
+    return jsonify({
+        'success': True,
+        'tasks': tasks
+    })
+
 @app.route('/api/extension/history/<bvid>', methods=['GET'])
 @extension_auth_required
 def extension_check_history(bvid):

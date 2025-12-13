@@ -4125,3 +4125,123 @@ function updateGuestQuotaDisplay() {
         quotaDisplay.style.display = 'none';
     }
 }
+
+// ================== 插件任务显示功能 ==================
+
+let extensionTasksPollingTimer = null;
+
+/**
+ * 获取并显示插件任务
+ */
+async function fetchExtensionTasks() {
+    if (isGuestUser) return; // Guest 用户不支持插件
+
+    try {
+        const response = await fetch('/api/extension/tasks');
+        const data = await response.json();
+
+        if (data.success) {
+            renderExtensionTasks(data.tasks);
+        }
+    } catch (error) {
+        console.error('[Extension Tasks] 获取失败:', error);
+    }
+}
+
+/**
+ * 渲染插件任务卡片
+ */
+function renderExtensionTasks(tasks) {
+    const section = document.getElementById('extensionTasksSection');
+    const grid = document.getElementById('extensionTasksGrid');
+    const countEl = document.getElementById('extensionTaskCount');
+
+    if (!section || !grid) return;
+
+    // 如果没有任务，隐藏区域
+    if (!tasks || tasks.length === 0) {
+        section.style.display = 'none';
+        return;
+    }
+
+    // 显示区域
+    section.style.display = 'block';
+
+    // 更新计数
+    if (countEl) {
+        countEl.textContent = `${tasks.length} 个进行中`;
+    }
+
+    // 渲染卡片
+    grid.innerHTML = tasks.map(task => {
+        const stageText = getStageText(task.status);
+        return `
+            <div class="extension-task-card" data-bvid="${task.bvid}">
+                <div class="extension-task-title" title="${escapeHtml(task.title)}">${escapeHtml(task.title || task.bvid)}</div>
+                <div class="extension-task-progress">
+                    <div class="extension-task-progress-bar">
+                        <div class="extension-task-progress-fill" style="width: ${task.progress}%"></div>
+                    </div>
+                </div>
+                <div class="extension-task-status">
+                    <span>${task.stage_desc || stageText}</span>
+                    <span class="extension-task-percent">${task.progress}%</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * 获取任务状态文本
+ */
+function getStageText(status) {
+    const statusMap = {
+        'pending': '等待处理',
+        'downloading': '下载音频',
+        'uploading': '上传文件',
+        'transcribing': '语音识别',
+        'processing': '处理结果',
+        'completed': '已完成',
+        'failed': '失败',
+        'cancelled': '已取消'
+    };
+    return statusMap[status] || status;
+}
+
+/**
+ * 开始插件任务轮询
+ */
+function startExtensionTasksPolling() {
+    // 立即获取一次
+    fetchExtensionTasks();
+
+    // 每 3 秒轮询一次
+    if (extensionTasksPollingTimer) {
+        clearInterval(extensionTasksPollingTimer);
+    }
+    extensionTasksPollingTimer = setInterval(fetchExtensionTasks, 3000);
+}
+
+/**
+ * 停止插件任务轮询
+ */
+function stopExtensionTasksPolling() {
+    if (extensionTasksPollingTimer) {
+        clearInterval(extensionTasksPollingTimer);
+        extensionTasksPollingTimer = null;
+    }
+}
+
+// 页面加载后启动插件任务轮询
+document.addEventListener('DOMContentLoaded', () => {
+    // 延迟启动，等待用户状态加载完成
+    setTimeout(() => {
+        if (!isGuestUser) {
+            startExtensionTasksPolling();
+        }
+    }, 2000);
+});
+
+// 页面卸载前停止轮询
+window.addEventListener('beforeunload', stopExtensionTasksPolling);
