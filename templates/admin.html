@@ -352,6 +352,67 @@
             justify-content: flex-end;
             margin-top: 1.5rem;
         }
+
+        /* 插件设置样式 */
+        .extension-box {
+            padding: 1rem 0;
+        }
+
+        .extension-info {
+            margin-bottom: 1rem;
+        }
+
+        .extension-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .extension-label {
+            color: var(--text-secondary);
+            min-width: 80px;
+        }
+
+        .extension-token {
+            font-family: monospace;
+            font-size: 0.9rem;
+            background: var(--bg-input);
+            padding: 0.5rem 0.75rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            color: var(--accent-primary);
+            max-width: 400px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sync-status {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .sync-status.connected {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success);
+        }
+
+        .sync-status.disconnected {
+            background: rgba(152, 152, 168, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .extension-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn-small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+        }
     </style>
 </head>
 
@@ -416,6 +477,45 @@
                     </tr>
                 </tbody>
             </table>
+        </div>
+
+        <!-- Chrome 插件设置 -->
+        <div class="section">
+            <div class="section-header">
+                <h2>🔌 Chrome 插件设置</h2>
+            </div>
+            <div class="extension-box">
+                <div class="extension-info">
+                    <div class="extension-row">
+                        <span class="extension-label">插件令牌：</span>
+                        <code id="extensionToken" class="extension-token">未生成</code>
+                        <button class="btn btn-secondary btn-small" id="copyTokenBtn" onclick="copyExtensionToken()"
+                            style="display: none;">复制</button>
+                    </div>
+                    <div class="extension-row">
+                        <span class="extension-label">同步状态：</span>
+                        <span id="extensionSyncStatus" class="sync-status">未绑定</span>
+                    </div>
+                    <div class="extension-row" id="lastSyncRow" style="display: none;">
+                        <span class="extension-label">最后同步：</span>
+                        <span id="extensionLastSync">-</span>
+                    </div>
+                </div>
+                <div class="extension-actions">
+                    <button class="btn btn-primary" onclick="generateExtensionToken()">生成/重新生成令牌</button>
+                    <button class="btn btn-danger" id="unbindBtn" onclick="unbindExtension()"
+                        style="display: none;">解绑插件</button>
+                </div>
+                <div class="extension-help" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
+                    <p>📌 使用说明：</p>
+                    <ol style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                        <li>点击「生成令牌」获取您的专属插件令牌</li>
+                        <li>安装 BiliSub Chrome 插件</li>
+                        <li>在插件设置中填入服务器地址和令牌</li>
+                        <li>插件将自动同步 B站 Cookie 到服务器</li>
+                    </ol>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -722,10 +822,97 @@
             });
         });
 
+        // ============ Chrome 插件管理 ============
+
+        async function loadExtensionStatus() {
+            try {
+                const response = await fetch('/api/user/extension/status');
+                const data = await response.json();
+                if (data.success) {
+                    const tokenEl = document.getElementById('extensionToken');
+                    const statusEl = document.getElementById('extensionSyncStatus');
+                    const copyBtn = document.getElementById('copyTokenBtn');
+                    const unbindBtn = document.getElementById('unbindBtn');
+                    const lastSyncRow = document.getElementById('lastSyncRow');
+                    const lastSyncEl = document.getElementById('extensionLastSync');
+
+                    if (data.has_token) {
+                        tokenEl.textContent = data.token;
+                        copyBtn.style.display = 'inline-block';
+                        unbindBtn.style.display = 'inline-block';
+
+                        if (data.last_sync) {
+                            statusEl.textContent = '已绑定';
+                            statusEl.className = 'sync-status connected';
+                            lastSyncRow.style.display = 'flex';
+                            lastSyncEl.textContent = new Date(data.last_sync).toLocaleString();
+                        } else {
+                            statusEl.textContent = '已生成令牌，等待插件连接';
+                            statusEl.className = 'sync-status disconnected';
+                            lastSyncRow.style.display = 'none';
+                        }
+                    } else {
+                        tokenEl.textContent = '未生成';
+                        statusEl.textContent = '未绑定';
+                        statusEl.className = 'sync-status disconnected';
+                        copyBtn.style.display = 'none';
+                        unbindBtn.style.display = 'none';
+                        lastSyncRow.style.display = 'none';
+                    }
+                }
+            } catch (error) {
+                console.error('加载插件状态失败:', error);
+            }
+        }
+
+        async function generateExtensionToken() {
+            if (!confirm('确定要生成/重新生成插件令牌吗？如果已有插件在使用，需要重新配置。')) return;
+
+            try {
+                const response = await fetch('/api/user/extension/generate-token', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    loadExtensionStatus();
+                    showToast('插件令牌已生成', 'success');
+                } else {
+                    showToast(data.error, 'error');
+                }
+            } catch (error) {
+                showToast('操作失败', 'error');
+            }
+        }
+
+        async function unbindExtension() {
+            if (!confirm('确定要解绑插件吗？解绑后需要重新生成令牌。')) return;
+
+            try {
+                const response = await fetch('/api/user/extension/unbind', { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    loadExtensionStatus();
+                    showToast('插件已解绑', 'success');
+                } else {
+                    showToast(data.error, 'error');
+                }
+            } catch (error) {
+                showToast('操作失败', 'error');
+            }
+        }
+
+        function copyExtensionToken() {
+            const token = document.getElementById('extensionToken').textContent;
+            if (token && token !== '未生成') {
+                navigator.clipboard.writeText(token).then(() => {
+                    showToast('令牌已复制', 'success');
+                });
+            }
+        }
+
         // 初始化
         loadStats();
         loadInviteCode();
         loadUsers();
+        loadExtensionStatus();
     </script>
 </body>
 

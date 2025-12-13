@@ -1,13 +1,28 @@
-version: '3.3'
+version: '3.8'
 
 services:
   bilisub:
-    build: .
+    image: peihhio/bilisub:latest
     container_name: bilisub
-    restart: unless-stopped
+    restart: always
     ports:
       - "5001:5001"
     volumes:
-      # 数据持久化：将容器内的数据库目录挂载到宿主机
-      # 格式：宿主机路径:容器内路径
+      # 挂载数据目录，确保更新容器后配置、历史记录、账号信息不丢失
       - ./data:/app/database
+      # 挂载临时目录（可选，方便本地查看下载的文件）
+      - ./temp:/app/temp
+    environment:
+      - FLASK_ENV=production
+      # 如果您在中国大陆服务器运行，可能需要配置时区
+      - TZ=Asia/Shanghai
+
+  # (可选) 自动更新服务 Watchtower
+  # 如果启动这个服务，它每小时会自动检查更新，如果有新镜像会自动帮你重启 bilisub
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: watchtower
+  #   restart: always
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   command: --interval 3600 --cleanup

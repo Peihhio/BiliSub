@@ -468,3 +468,86 @@ def delete_history_by_url():
         logger.error(f"[history] 根据URL删除历史记录失败: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+# ==================== Chrome 插件管理 API ====================
+
+@auth_bp.route('/api/user/extension/generate-token', methods=['POST'])
+@login_required
+def generate_extension_token():
+    """生成/重新生成插件令牌"""
+    import secrets
+    from datetime import datetime
+    
+    # Guest 用户不允许使用插件
+    if getattr(current_user, 'is_guest', False):
+        return jsonify({'success': False, 'error': 'Guest 账户不支持插件功能'}), 403
+    
+    try:
+        # 生成 64 字符的安全令牌
+        new_token = secrets.token_urlsafe(48)[:64]
+        current_user.extension_token = new_token
+        current_user.extension_last_sync = None  # 重置同步时间
+        db.session.commit()
+        
+        logger.info(f"[extension] 用户 {current_user.username} 生成了新的插件令牌")
+        
+        return jsonify({
+            'success': True,
+            'token': new_token,
+            'message': '插件令牌已生成'
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[extension] 生成插件令牌失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@auth_bp.route('/api/user/extension/status', methods=['GET'])
+@login_required
+def get_extension_status():
+    """获取插件绑定状态"""
+    # Guest 用户
+    if getattr(current_user, 'is_guest', False):
+        return jsonify({
+            'success': True,
+            'has_token': False,
+            'token': None,
+            'last_sync': None,
+            'message': 'Guest 账户不支持插件功能'
+        })
+    
+    has_token = bool(current_user.extension_token)
+    last_sync = current_user.extension_last_sync.isoformat() if current_user.extension_last_sync else None
+    
+    return jsonify({
+        'success': True,
+        'has_token': has_token,
+        'token': current_user.extension_token if has_token else None,
+        'last_sync': last_sync,
+        'message': '已绑定' if has_token else '未绑定'
+    })
+
+
+@auth_bp.route('/api/user/extension/unbind', methods=['DELETE'])
+@login_required
+def unbind_extension():
+    """解绑插件（清除令牌）"""
+    if getattr(current_user, 'is_guest', False):
+        return jsonify({'success': False, 'error': 'Guest 账户不支持插件功能'}), 403
+    
+    try:
+        current_user.extension_token = None
+        current_user.extension_last_sync = None
+        db.session.commit()
+        
+        logger.info(f"[extension] 用户 {current_user.username} 解绑了插件")
+        
+        return jsonify({
+            'success': True,
+            'message': '插件已解绑'
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[extension] 解绑插件失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+

@@ -2974,6 +2974,297 @@ def cancel_batch(batch_id):
         "has_processing": result.get("has_processing", False)
     })
 
+
+# ==================== Chrome 插件专用 API ====================
+
+def get_user_by_extension_token(token):
+    """通过插件令牌获取用户"""
+    if not token:
+        return None
+    from models import User
+    return User.query.filter_by(extension_token=token).first()
+
+
+def extension_auth_required(f):
+    """插件认证装饰器"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = request.headers.get('X-Extension-Token', '').strip()
+        if not token:
+            return jsonify({'success': False, 'error': '缺少插件令牌'}), 401
+        
+        user = get_user_by_extension_token(token)
+        if not user:
+            return jsonify({'success': False, 'error': '无效的插件令牌'}), 401
+        
+        # 将用户信息存入 g 对象
+        from flask import g
+        g.extension_user = user
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+@app.route('/api/extension/sync-cookie', methods=['POST'])
+@extension_auth_required
+def extension_sync_cookie():
+    """
+    接收插件同步的 B站 Cookie
+    
+    请求头:
+        X-Extension-Token: 插件令牌
+    
+    请求体:
+        {"cookie": "SESSDATA=xxx; buvid3=yyy; ..."}
+    
+    响应:
+        {"success": true, "message": "Cookie已同步"}
+    """
+    from flask import g
+    from datetime import datetime
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '请求体为空'}), 400
+        
+        cookie = data.get('cookie', '').strip()
+        if not cookie:
+            return jsonify({'success': False, 'error': '缺少 Cookie 数据'}), 400
+        
+        user = g.extension_user
+        
+        # 更新用户的 B站 Cookie
+        user.bili_cookie = cookie
+        user.extension_last_sync = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f"[extension] 用户 {user.username} 同步了 Cookie，长度: {len(cookie)}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Cookie 已同步',
+            'sync_time': user.extension_last_sync.isoformat()
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[extension] Cookie 同步失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/extension/subtitle', methods=['POST'])
+@extension_auth_required
+def extension_get_subtitle():
+    """
+    获取视频字幕（插件专用）
+    
+    请求头:
+        X-Extension-Token: 插件令牌
+    
+    请求体:
+        {"bvid": "BVxxxxx", "use_asr": false}
+    
+    响应:
+        {"success": true, "transcript": "字幕内容...", "source": "bilibili/asr"}
+    """
+    from flask import g
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '请求体为空'}), 400
+        
+        bvid = data.get('bvid', '').strip()
+        use_asr = data.get('use_asr', False)  # 是否使用语音识别（默认否）
+        
+        if not bvid:
+            return jsonify({'success': False, 'error': '缺少 bvid 参数'}), 400
+        
+        user = g.extension_user
+        bili_cookie = user.bili_cookie
+        api_key = user.api_key
+        
+        # 构建视频 URL
+        video_url = f"https://www.bilibili.com/video/{bvid}"
+        
+        log_collector = LogCollector()
+        transcript = None
+        source = None
+        
+        # 优先尝试获取 B站自带字幕
+        if bili_cookie:
+            try:
+                transcript = get_bilibili_subtitles(video_url, log_collector, bili_cookie)
+                if transcript:
+                    source = 'bilibili'
+                    logger.info(f"[extension] 从 B站获取字幕成功: {bvid}")
+            except Exception as e:
+                logger.warning(f"[extension] 获取 B站字幕失败: {e}")
+        
+        # 如果没有字幕且允许使用语音识别
+        if not transcript and use_asr and api_key:
+            try:
+                # 下载音频并转录
+                audio_path, duration = download_bilibili_audio(video_url, AUDIO_DIR, log_collector)
+                
+                # 根据模式选择处理方式
+                use_self_hosted = user.use_self_hosted
+                self_hosted_domain = user.self_hosted_domain
+                
+                if use_self_hosted and self_hosted_domain:
+                    # 使用本地直链
+                    transcript = transcribe_with_self_hosted(
+                        audio_path, api_key, self_hosted_domain, log_collector
+                    )
+                else:
+                    # 使用第三方直链
+                    transcript = transcribe_with_third_party(audio_path, api_key, log_collector)
+                
+                if transcript:
+                    source = 'asr'
+                    logger.info(f"[extension] 语音识别成功: {bvid}")
+                
+                # 清理音频文件
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+            except Exception as e:
+                logger.error(f"[extension] 语音识别失败: {e}")
+        
+        if transcript:
+            return jsonify({
+                'success': True,
+                'transcript': transcript,
+                'source': source
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '未能获取字幕',
+                'transcript': None
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"[extension] 获取字幕失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/extension/llm', methods=['POST'])
+@extension_auth_required
+def extension_llm_process():
+    """
+    调用大模型处理字幕（插件专用）
+    
+    请求头:
+        X-Extension-Token: 插件令牌
+    
+    请求体:
+        {
+            "content": "字幕内容",
+            "question": "用户问题（可选）",
+            "use_user_config": true  // 是否使用用户保存的 LLM 配置
+        }
+    
+    或使用自定义配置:
+        {
+            "content": "字幕内容",
+            "question": "用户问题",
+            "api_key": "sk-xxx",
+            "api_url": "https://api.openai.com/v1/chat/completions",
+            "model": "gpt-4o-mini"
+        }
+    """
+    from flask import g
+    import requests as req
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '请求体为空'}), 400
+        
+        content = data.get('content', '').strip()
+        question = data.get('question', '').strip()
+        use_user_config = data.get('use_user_config', True)
+        
+        if not content:
+            return jsonify({'success': False, 'error': '缺少字幕内容'}), 400
+        
+        user = g.extension_user
+        
+        # 获取 LLM 配置
+        if use_user_config:
+            api_key = user.llm_api_key or user.api_key  # 优先使用 LLM API Key，否则使用 Paraformer API Key
+            api_url = user.llm_api_url or 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+            model = user.llm_model or 'qwen-turbo'
+            prompt = user.llm_prompt or '你是一个有帮助的AI助手。请根据视频字幕内容回答用户问题。'
+        else:
+            api_key = data.get('api_key', '').strip()
+            api_url = data.get('api_url', 'https://api.openai.com/v1/chat/completions').strip()
+            model = data.get('model', 'gpt-4o-mini').strip()
+            prompt = data.get('prompt', '你是一个有帮助的AI助手。').strip()
+        
+        if not api_key:
+            return jsonify({'success': False, 'error': '未配置 LLM API Key'}), 400
+        
+        # 构建请求
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        messages = [
+            {"role": "system", "content": prompt}
+        ]
+        
+        # 添加字幕内容
+        user_content = f"视频字幕内容:\n{content}"
+        if question:
+            user_content += f"\n\n用户问题: {question}"
+        
+        messages.append({"role": "user", "content": user_content})
+        
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.7
+        }
+        
+        # 确保 API URL 完整
+        if 'chat/completions' not in api_url:
+            api_url = api_url.rstrip('/') + '/v1/chat/completions' if '/v1' not in api_url else api_url.rstrip('/') + '/chat/completions'
+        
+        response = req.post(api_url, headers=headers, json=payload, timeout=120, proxies={})
+        
+        if response.status_code != 200:
+            return jsonify({
+                'success': False,
+                'error': f'API 调用失败: {response.status_code}'
+            }), 500
+        
+        result = response.json()
+        
+        # 提取回复
+        ai_response = None
+        if 'choices' in result and len(result['choices']) > 0:
+            choice = result['choices'][0]
+            if 'message' in choice and 'content' in choice['message']:
+                ai_response = choice['message']['content']
+        
+        if ai_response:
+            return jsonify({
+                'success': True,
+                'response': ai_response
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '无法解析 AI 响应'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"[extension] LLM 处理失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info("B站字幕提取服务启动")

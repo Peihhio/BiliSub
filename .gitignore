@@ -42,3 +42,4 @@ env/
 *.tmp
 *.temp
 *.har
+publish_docker.sh

@@ -31,6 +31,10 @@ class User(UserMixin, db.Model):
     use_self_hosted = db.Column(db.Boolean, default=False)  # 是否使用自建存储
     self_hosted_domain = db.Column(db.String(500), nullable=True)  # 自建域名
     
+    # Chrome 插件绑定
+    extension_token = db.Column(db.String(64), unique=True, nullable=True, index=True)  # 插件令牌
+    extension_last_sync = db.Column(db.DateTime, nullable=True)  # 插件最后同步时间
+    
     # 关联的历史记录
     history_items = db.relationship('HistoryItem', backref='user', lazy='dynamic',
                                     cascade='all, delete-orphan')
