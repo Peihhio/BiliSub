@@ -1,0 +1,67 @@
+name: Build and Publish Docker Image
+
+# 触发规则
+on:
+  push:
+    branches: [ "main" ]    # 推送 main 分支时触发
+    tags: [ 'v*.*.*' ]      # 推送如 v1.0.0 的标签时触发
+  workflow_dispatch:        # 允许在 GitHub 网页手动触发
+
+env:
+  # 使用 DockerHub 的仓库名
+  IMAGE_NAME: peihhio/bilisub
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # 1.甚至代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 设置 QEMU (用于多架构构建 ARM64)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # 3. 设置 Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 4. 登录到 DockerHub
+      - name: Log into Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 5. 提取元数据 (tags, labels)
+      # 自动处理版本号逻辑：
+      # - 如果是 tag v1.0.0 -> 镜像标签为 :v1.0.0 和 :latest
+      # - 如果是 push main -> 镜像标签为 :main
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+
+      # 6. 构建并推送
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # 同时构建 AMD64 (服务器) 和 ARM64 (Mac/树莓派)
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
