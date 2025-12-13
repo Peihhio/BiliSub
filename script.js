@@ -154,11 +154,69 @@ function updateConfigStatusSummary() {
                 llmDot.className = 'status-dot';
         }
     }
+
+    // 更新提取方式提示
+    updateExtractionModeHint();
+}
+
+/**
+ * 更新提取方式提示
+ * 根据 API Key 和 Cookie 的有效性状态显示不同的提示信息
+ */
+function updateExtractionModeHint() {
+    const hintContainer = document.getElementById('extractionModeHint');
+    const hintText = document.getElementById('extractionModeText');
+
+    if (!hintContainer || !hintText) return;
+
+    // 检测 API Key 和 Cookie 的有效性
+    const apiKeyDot = document.getElementById('apiKeyStatusDot');
+    const apiKeyValid = apiKeyDot?.classList.contains('status-ok');
+    const cookieValid = currentCookieStatus === COOKIE_STATUS.VALID;
+
+    // 检测本地直链状态
+    const useSelfHostedToggle = document.getElementById('useSelfHostedStorage');
+    const isLocalDirect = useSelfHostedToggle?.checked || false;
+
+    // 移除所有状态类
+    hintContainer.classList.remove('mode-ok', 'mode-warning', 'mode-error');
+
+    // 构建提示信息
+    let message = '';
+
+    // 本地直链状态（始终放在最后）
+    const directLinkStatus = isLocalDirect
+        ? '本地直链可用（高速）'
+        : '使用第三方直链（速度较慢）';
+
+    if (apiKeyValid && cookieValid) {
+        // 两者都有效
+        if (isLocalDirect) {
+            hintContainer.classList.add('mode-ok');
+        } else {
+            hintContainer.classList.add('mode-warning');
+        }
+        message = `优先提取自带字幕，无字幕视频使用语音转录 | ${directLinkStatus}`;
+    } else if (apiKeyValid && !cookieValid) {
+        // API 有效，Cookie 无效
+        hintContainer.classList.add('mode-warning');
+        message = `Cookie 无效，跳过字幕提取，全部视频使用语音转录 | ${directLinkStatus}`;
+    } else if (!apiKeyValid && cookieValid) {
+        // API 无效，Cookie 有效
+        hintContainer.classList.add('mode-warning');
+        message = `API Key 无效，仅能提取视频自带字幕，无字幕视频将提取失败 | ${directLinkStatus}`;
+    } else {
+        // 两者都无效
+        hintContainer.classList.add('mode-error');
+        message = `API Key 和 Cookie 均无效，无法提取字幕 | ${directLinkStatus}`;
+    }
+
+    hintText.textContent = message;
 }
 
 
 /**
- * 更新存储状态UI（自建直链/第三方直链）
+ * 更新存储状态UI（本地直链/第三方直链）
  */
 function updateStorageUI(useSelfHosted) {
     console.log('Updating storage UI:', useSelfHosted);
@@ -170,7 +228,7 @@ function updateStorageUI(useSelfHosted) {
     if (storageStatusDot && storageStatusText) {
         if (useSelfHosted) {
             storageStatusDot.className = 'status-dot status-ok'; // 绿色
-            storageStatusText.textContent = '自建直链';
+            storageStatusText.textContent = '本地直链';
         } else {
             storageStatusDot.className = 'status-dot status-warning'; // 黄色
             storageStatusText.textContent = '第三方直链';
@@ -195,8 +253,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const selfHostedDomainInput = document.getElementById('selfHostedDomain');
     const storageHint = document.getElementById('storageHint');
 
-    // 存储模式现在由 loadSavedData 自动检测，无需手动切换
-    console.log('Storage mode will be auto-detected based on HTTPS protocol');
+    // 存储模式现在由 loadSavedData 自动检测公网可访问性，无需手动切换\n    console.log('Storage mode will be auto-detected based on public network accessibility');
 
     // 延迟加载配置，让页面先渲染完成再执行 API 验证
     // 这样用户可以立即看到并操作界面，验证在后台进行
@@ -281,10 +338,11 @@ async function loadSavedData() {
         const response = await fetch('/api/load-config');
         const data = await response.json();
 
-        // 立即检测并设置存储模式（不依赖服务器响应）
-        const isHttps = window.location.protocol === 'https:';
-        updateStorageUI(isHttps);
-        console.log('[Auto-Storage] Detected protocol:', window.location.protocol, '=>', isHttps ? '自建直链' : '第三方直链');
+        // 检测公网可访问性（替代原来的 HTTPS 协议检测）
+        // 阿里云 Paraformer-v2 同时支持 HTTP 和 HTTPS，关键是要公网可访问
+        const publicAccessResult = await checkPublicAccess();
+        updateStorageUI(publicAccessResult.is_public);
+        console.log('[Auto-Storage] Public access check:', publicAccessResult.reason, '=>', publicAccessResult.is_public ? '本地直链' : '第三方直链');
 
         if (data.success && data.config) {
             const config = data.config;
@@ -340,6 +398,9 @@ async function loadSavedData() {
 
             if (effectiveApiKey) {
                 verificationPromises.push(testLlmConfig(effectiveApiKey, effectiveApiUrl, effectiveModel, isAllDefault));
+            } else {
+                // API Key 为空，大模型显示错误状态
+                updateLlmStatus('error', '未配置');
             }
 
             // 并行执行所有验证
@@ -355,9 +416,41 @@ async function loadSavedData() {
         console.error('加载配置失败:', error);
         updateCookieStatus(COOKIE_STATUS.NONE);
 
-        // 即使加载失败，也检测存储模式
-        const isHttps = window.location.protocol === 'https:';
-        updateStorageUI(isHttps);
+        // 即使加载失败，也检测存储模式（默认使用第三方直链）
+        updateStorageUI(false);
+    }
+}
+
+/**
+ * 检测服务是否有公网可访问性
+ * 用于决定使用本地直链还是第三方直链服务
+ * 
+ * 阿里云 Paraformer-v2 要求：
+ * - 支持 HTTP 和 HTTPS 协议
+ * - 文件 URL 必须是公网可访问的
+ */
+async function checkPublicAccess() {
+    try {
+        const response = await fetch('/api/check-public-access', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                origin: window.location.origin
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('[Public Access Check] 检测失败:', error);
+        return {
+            is_public: false,
+            public_url: null,
+            reason: '检测失败，默认使用第三方直链'
+        };
     }
 }
 
@@ -431,12 +524,6 @@ function checkConfigExpand() {
 async function handleSaveAndVerifyApiKey() {
     const apiKey = apiKeyInput?.value?.trim() || '';
 
-    if (!apiKey) {
-        showToast('请输入 API Key', 'warning');
-        if (apiKeyVerifyStatus) apiKeyVerifyStatus.textContent = '';
-        return;
-    }
-
     // 显示验证中状态
     if (apiKeyVerifyStatus) {
         apiKeyVerifyStatus.textContent = '验证中...';
@@ -447,14 +534,33 @@ async function handleSaveAndVerifyApiKey() {
     }
 
     try {
-        // 1. 保存到服务器
+        // 1. 保存到服务器（即使为空也保存）
         await fetch('/api/save-config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ api_key: apiKey })
         });
 
-        // 2. 验证 API Key（通过测试大模型接口）
+        // 2. 如果 API Key 为空，直接标记为无效状态
+        if (!apiKey) {
+            showToast('API Key 已清空', 'info');
+            if (apiKeyVerifyStatus) {
+                apiKeyVerifyStatus.textContent = '✗ 未配置';
+                apiKeyVerifyStatus.className = 'verify-status error';
+            }
+            // 更新 API Key 状态灯为熄灭（错误状态）
+            const apiKeyStatusDot = document.getElementById('apiKeyStatusDot');
+            if (apiKeyStatusDot) {
+                apiKeyStatusDot.className = 'status-dot status-error';
+            }
+            // 同步更新大模型状态（因为大模型默认使用 Paraformer API Key）
+            await saveLlmConfig(true);
+            // 更新配置摘要
+            updateConfigStatusSummary();
+            return;
+        }
+
+        // 3. 验证 API Key（通过测试大模型接口）
         const response = await fetch('/api/llm_process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -483,16 +589,34 @@ async function handleSaveAndVerifyApiKey() {
                 apiKeyStatusDot.className = 'status-dot status-ok';
             }
 
-            // 3. 自动验证大模型配置
+            // 4. 自动验证大模型配置
             await saveLlmConfig(true);
 
             // 更新配置摘要
             updateConfigStatusSummary();
+
+            // 尝试自动折叠配置（如果 Cookie 也有效）
+            checkAutoCollapse();
         } else {
             showToast(`API Key 验证失败: ${data.error}`, 'error');
             if (apiKeyVerifyStatus) {
                 apiKeyVerifyStatus.textContent = '✗ 验证失败';
                 apiKeyVerifyStatus.className = 'verify-status error';
+            }
+            // 更新 API Key 状态灯为错误状态
+            const apiKeyStatusDot = document.getElementById('apiKeyStatusDot');
+            console.log('[API Key] 验证失败，更新状态灯:', apiKeyStatusDot);
+            if (apiKeyStatusDot) {
+                apiKeyStatusDot.className = 'status-dot status-error';
+                console.log('[API Key] 状态灯已更新为 error');
+            }
+            // 更新配置摘要（在 saveLlmConfig 之前）
+            updateConfigStatusSummary();
+            // 同步更新大模型状态（因为大模型默认使用 Paraformer API Key）
+            try {
+                await saveLlmConfig(true);
+            } catch (e) {
+                console.error('[API Key] saveLlmConfig 出错:', e);
             }
         }
     } catch (error) {
@@ -501,6 +625,14 @@ async function handleSaveAndVerifyApiKey() {
             apiKeyVerifyStatus.textContent = '✗ 网络错误';
             apiKeyVerifyStatus.className = 'verify-status error';
         }
+        // 更新 API Key 状态灯为错误状态
+        const apiKeyStatusDot = document.getElementById('apiKeyStatusDot');
+        if (apiKeyStatusDot) {
+            apiKeyStatusDot.className = 'status-dot status-error';
+        }
+        // 同步更新大模型状态（因为大模型默认使用 Paraformer API Key）
+        await saveLlmConfig(true);
+        updateConfigStatusSummary();
     } finally {
         if (saveAndVerifyApiKeyBtn) {
             saveAndVerifyApiKeyBtn.disabled = false;
@@ -554,9 +686,10 @@ async function saveLlmConfig(autoTriggered = false) {
     // 检查是否有可用的 API Key
     if (!effectiveApiKey) {
         if (!autoTriggered) {
-            showToast('请先配置 DashScope API Key', 'warning');
+            showToast('API Key 未配置，大模型功能不可用', 'warning');
         }
-        updateLlmStatus('warning', '未配置');
+        // API Key 无效时，大模型状态显示为错误
+        updateLlmStatus('error', '未配置');
         return;
     }
 
@@ -1089,8 +1222,29 @@ async function saveAndVerifyCookie() {
     if (!fullCookieText) return;
 
     const cookieValue = fullCookieText.value.trim();
+
+    // 如果 Cookie 为空，保存空值并更新状态为无效
     if (!cookieValue) {
-        showToast('请输入Cookie内容', 'error');
+        // 清空隐藏 input
+        if (biliCookieInput) {
+            biliCookieInput.value = '';
+        }
+
+        // 保存到服务器（空值）
+        try {
+            await fetch('/api/save-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bili_cookie: '' })
+            });
+        } catch (error) {
+            console.error('保存 Cookie 失败:', error);
+        }
+
+        // 更新状态为无效
+        updateCookieStatus(COOKIE_STATUS.NONE);
+        showToast('Cookie 已清空', 'info');
+        updateConfigStatusSummary();
         return;
     }
 
@@ -1360,15 +1514,18 @@ function renderVideoList() {
         // 状态徽章：完成、失败或取消时显示
         let statusBadge = '';
         let progressBarClass = '';
+        let showRetryBtn = false;
         if (progress.status === 'completed' || video.status === 'completed') {
             statusBadge = '<span class="video-result-badge success">已完成</span>';
             progressBarClass = 'completed';
         } else if (progress.status === 'error' || video.status === 'error') {
             statusBadge = '<span class="video-result-badge error">提取失败</span>';
             progressBarClass = 'error';
+            showRetryBtn = true;
         } else if (progress.status === 'cancelled' || video.status === 'cancelled') {
             statusBadge = '<span class="video-result-badge cancelled">已取消</span>';
             progressBarClass = 'cancelled';
+            showRetryBtn = true;
         } else if (progress.status === 'processing') {
             progressBarClass = 'processing';
         }
@@ -1376,11 +1533,23 @@ function renderVideoList() {
         // 封面图：如果有就显示，否则使用占位符
         const coverUrl = video.pic || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"%3E%3Crect fill="%23333" width="160" height="100"/%3E%3Ctext x="50%25" y="50%25" fill="%23666" text-anchor="middle" dy=".3em"%3E' + video.index + '%3C/text%3E%3C/svg%3E';
 
+        // 重试按钮HTML（仅失败或取消时显示）
+        const retryBtnHtml = showRetryBtn ? `
+            <button class="video-retry-btn" title="重试" 
+                    onclick="event.stopPropagation(); retrySingleVideo(${video.index})">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                </svg>
+            </button>
+        ` : '';
+
         html += `
             <div class="video-item history-item-card ${statusClass} ${isActive ? 'active' : ''}"
                  data-index="${video.index}"
                  id="video-card-${video.index}"
                  onclick="selectVideo(${video.index})">
+                ${retryBtnHtml}
                 <input type="checkbox" class="video-checkbox"
                        ${isChecked ? 'checked' : ''}
                        onclick="event.stopPropagation(); toggleVideoSelection(${video.index})">
@@ -1420,11 +1589,7 @@ function renderVideoList() {
                             </button>
                             <button class="video-action-btn ai-btn" title="AI处理"
                                     onclick="event.stopPropagation(); processWithLLM('video', ${video.index})">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="12" cy="12" r="10"/>
-                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                                </svg>
+                                AI
                             </button>
                             <button class="video-action-btn delete-btn" title="删除"
                                     onclick="event.stopPropagation(); deleteVideoItem(${video.index})">
@@ -1451,6 +1616,144 @@ function renderVideoList() {
 
     // Update batch operation button states
     updateCurrentBatchButtons();
+}
+
+/**
+ * 重试单个失败的视频
+ * 根据当前最新的配置状态重新进行字幕提取
+ */
+async function retrySingleVideo(index) {
+    const video = videoList.find(v => v.index === index);
+    if (!video) {
+        showToast('找不到该视频', 'error');
+        return;
+    }
+
+    // 获取当前最新的配置状态
+    const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
+    const biliCookie = biliCookieInput ? biliCookieInput.value.trim() : '';
+    const cookieValid = currentCookieStatus === COOKIE_STATUS.VALID;
+    const apiKeyValid = apiKey && document.getElementById('apiKeyStatusDot')?.classList.contains('status-ok');
+
+    // 检查是否可以进行提取
+    if (!cookieValid && !apiKeyValid) {
+        showToast('Cookie 和 API Key 均无效，无法提取字幕', 'error');
+        return;
+    }
+
+    // 获取存储模式配置
+    const useSelfHostedToggle = document.getElementById('useSelfHostedStorage');
+    const useSelfHosted = useSelfHostedToggle ? useSelfHostedToggle.checked : false;
+    const selfHostedDomain = useSelfHosted ? window.location.origin : '';
+
+    // 更新视频状态为处理中
+    video.status = 'processing';
+    video.statusText = '重新处理中...';
+    videoProgress[index] = { status: 'processing', progress: 0 };
+    renderVideoList();
+    showToast(`正在重新提取：${video.title}`, 'info');
+
+    try {
+        console.log(`[Retry] Starting retry for video ${index}: ${video.title}`);
+
+        // 调用批量处理API（只处理单个视频）
+        const response = await fetch(`${API_BASE}/api/transcribe_batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                videos: [video],  // 只传入一个视频
+                api_key: apiKey,
+                bili_cookie: biliCookie,
+                use_self_hosted: useSelfHosted,
+                self_hosted_domain: selfHostedDomain,
+                cookie_valid: cookieValid,
+                api_valid: apiKeyValid
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || '重试请求失败');
+        }
+
+        const batchId = data.batch_id;
+        console.log(`[Retry] Batch started for single video: ${batchId}`);
+
+        // 轮询获取结果
+        await pollRetryResult(batchId, index);
+
+    } catch (error) {
+        console.error(`[Retry] Failed for video ${index}:`, error);
+        video.status = 'error';
+        video.statusText = `失败: ${error.message}`;
+        videoProgress[index] = { status: 'error', progress: 100 };
+        renderVideoList();
+        showToast(`重试失败: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * 轮询重试结果（用于单视频重试）
+ */
+async function pollRetryResult(batchId, videoIndex) {
+    const maxAttempts = 600; // 最多轮询10分钟（语音转录可能较慢）
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+        try {
+            const response = await fetch(`${API_BASE}/api/batch_status/${batchId}`);
+            const json = await response.json();
+
+            if (!response.ok) {
+                throw new Error('获取状态失败');
+            }
+
+            const data = json.data; // 后端返回 { success: true, data: { ... } }
+
+            // 查找对应视频的状态 (后端返回的是 original_index)
+            const videoStatus = data.videos?.find(v => v.original_index === videoIndex);
+
+            if (videoStatus) {
+                // 更新进度
+                updateVideoCardProgress(videoIndex, videoStatus.status, videoStatus.progress || 0);
+
+                if (videoStatus.status === 'completed') {
+                    // 成功完成
+                    const video = videoList.find(v => v.index === videoIndex);
+                    if (videoStatus.result && videoStatus.result.transcript) {
+                        videoTranscripts[videoIndex] = videoStatus.result.transcript;
+
+                        // 更新历史记录
+                        if (video) {
+                            addToHistory(video, videoStatus.result.transcript, videoStatus.result.metadata || {});
+                        }
+                    }
+                    showToast(`重试成功：${video?.title || '视频'}`, 'success');
+                    renderVideoList();
+                    return;
+                } else if (videoStatus.status === 'error' || videoStatus.status === 'failed') {
+                    // 失败
+                    throw new Error(videoStatus.error || '提取失败');
+                }
+            }
+
+            // 检查批次是否完成
+            if (data.status === 'completed' || data.status === 'error') {
+                break;
+            }
+
+            // 等待1秒后继续轮询
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            attempts++;
+        } catch (error) {
+            console.error(`[Retry Poll] Error:`, error);
+            throw error;
+        }
+    }
+
+    // 超时
+    throw new Error('处理时间较长，请稍后查看历史记录确认结果');
 }
 
 /**
@@ -1487,11 +1790,17 @@ function updateVideoCardProgress(index, status, progress) {
         progressBar.classList.add(status);
     }
 
-    // 更新状态徽章
+    // 更新状态徽章和重试按钮
     if (card) {
         // 移除旧的徽章
         const oldBadge = card.querySelector('.video-result-badge');
         if (oldBadge) oldBadge.remove();
+
+        // 移除旧的重试按钮（状态变化时清理）
+        if (status !== 'error' && status !== 'cancelled') {
+            const oldRetryBtn = card.querySelector('.video-retry-btn');
+            if (oldRetryBtn) oldRetryBtn.remove();
+        }
 
         // 添加新徽章（完成、失败或取消时）
         if (status === 'completed' || status === 'error' || status === 'cancelled') {
@@ -1514,6 +1823,28 @@ function updateVideoCardProgress(index, status, progress) {
                 badge.textContent = badgeText;
                 metaArea.appendChild(badge);
                 console.log(`[Badge] 视频${index}: 徽章已添加 (${badgeText})`);
+            }
+        }
+
+        // 动态添加重试按钮（失败或取消时）
+        if (status === 'error' || status === 'cancelled') {
+            // 检查是否已存在重试按钮
+            if (!card.querySelector('.video-retry-btn')) {
+                const retryBtn = document.createElement('button');
+                retryBtn.className = 'video-retry-btn';
+                retryBtn.title = '重试';
+                retryBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                `;
+                retryBtn.onclick = (event) => {
+                    event.stopPropagation();
+                    retrySingleVideo(index);
+                };
+                card.appendChild(retryBtn);
+                console.log(`[Retry] 视频${index}: 重试按钮已添加`);
             }
         }
     } else {
@@ -1957,12 +2288,6 @@ async function handleExtract() {
     const apiKey = apiKeyInput.value.trim();
     const videoUrl = videoUrlInput.value.trim();
 
-    if (!apiKey) {
-        showToast('请输入阿里云API Key', 'error');
-        apiKeyInput.focus();
-        return;
-    }
-
     if (!videoUrl) {
         showToast('请输入B站视频链接', 'error');
         videoUrlInput.focus();
@@ -1974,10 +2299,23 @@ async function handleExtract() {
         return;
     }
 
-    // 验证Cookie（关键步骤前验证）
-    const cookieValid = await ensureCookieValid();
-    if (!cookieValid) {
+    // 检测 Cookie 和 API Key 的有效性状态
+    const biliCookie = biliCookieInput ? biliCookieInput.value.trim() : '';
+    const cookieValid = currentCookieStatus === COOKIE_STATUS.VALID;
+    const apiKeyValid = apiKey && document.getElementById('apiKeyStatusDot')?.classList.contains('status-ok');
+
+    // 根据有效性状态决定是否可以继续
+    if (!cookieValid && !apiKeyValid) {
+        showToast('Cookie 和 API Key 均无效，无法提取字幕', 'error');
         return;
+    }
+
+    if (!apiKeyValid && !apiKey) {
+        // API Key 为空，但 Cookie 有效，可以继续（仅提取自带字幕）
+        showToast('API Key 未配置，将仅提取自带字幕的视频', 'warning');
+    } else if (!cookieValid) {
+        // Cookie 无效，但 API Key 有效，可以继续（全部用转录）
+        showToast('Cookie 无效，将全部使用语音转录', 'warning');
     }
 
     setButtonLoading(true);
@@ -2034,7 +2372,7 @@ async function handleExtract() {
         // 自动使用当前页面域名作为自建服务地址
         const selfHostedDomain = useSelfHosted ? window.location.origin : '';
 
-        console.log('[Frontend] Starting batch transcription with storage config:', { useSelfHosted, selfHostedDomain });
+        console.log('[Frontend] Starting batch transcription with storage config:', { useSelfHosted, selfHostedDomain, cookieValid, apiKeyValid });
 
         const response = await fetch(`${API_BASE}/api/transcribe_batch`, {
             method: 'POST',
@@ -2044,7 +2382,9 @@ async function handleExtract() {
                 api_key: apiKey,
                 bili_cookie: biliCookie,
                 use_self_hosted: useSelfHosted,
-                self_hosted_domain: selfHostedDomain
+                self_hosted_domain: selfHostedDomain,
+                cookie_valid: cookieValid,
+                api_valid: apiKeyValid
             })
         });
 
@@ -2534,11 +2874,7 @@ function renderHistoryItem(item) {
                         </button>
                         <button class="video-action-btn ai-btn" title="AI处理" 
                                 onclick="event.stopPropagation(); processWithLLM('history', '${item.id}')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"/>
-                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                                <line x1="12" y1="17" x2="12.01" y2="17"/>
-                            </svg>
+                            AI
                         </button>
                         <button class="video-action-btn delete-btn" title="删除" 
                                 onclick="event.stopPropagation(); deleteHistoryItem('${item.id}')">
@@ -3015,27 +3351,54 @@ function formatDateForFilename(date) {
 // 智能配置折叠功能
 function toggleConfigVisibility(forceCollapse) {
     const section = document.getElementById('configSection');
-    if (!section) return;
+    console.log('[ToggleConfig] section:', section, 'forceCollapse:', forceCollapse);
+    if (!section) {
+        console.log('[ToggleConfig] configSection 元素不存在！');
+        return;
+    }
 
     if (forceCollapse !== undefined) {
         if (forceCollapse) {
             section.classList.add('collapsed');
+            console.log('[ToggleConfig] 添加 collapsed 类，当前类:', section.className);
         } else {
             section.classList.remove('collapsed');
+            console.log('[ToggleConfig] 移除 collapsed 类，当前类:', section.className);
         }
     } else {
         section.classList.toggle('collapsed');
+        console.log('[ToggleConfig] 切换 collapsed 类，当前类:', section.className);
     }
 }
 
 function checkAutoCollapse() {
-    const isCookieValid = currentCookieStatus === COOKIE_STATUS.VALID;
-    const apiKey = localStorage.getItem(STORAGE_KEY_LLM_API_KEY);
-    // 这里简单判定：只要Cookie有效且有API Key，就认为配置完成
-    // 如果需要更严格的LLM验证，可以在 saveLlmConfig 中设置一个标志
+    // 检查 Cookie 状态灯是否为绿色（验证通过）
+    const cookieDot = document.getElementById('cookieStatusDot');
+    const isCookieValid = cookieDot?.classList.contains('status-ok');
 
-    if (isCookieValid && apiKey) {
-        toggleConfigVisibility(true);
+    // 检查 API Key 状态灯是否为绿色（验证通过）
+    const apiKeyDot = document.getElementById('apiKeyStatusDot');
+    const isApiKeyValid = apiKeyDot?.classList.contains('status-ok');
+
+    console.log('[AutoCollapse] 检查自动折叠:', {
+        isCookieValid,
+        isApiKeyValid,
+        cookieDotClass: cookieDot?.className,
+        apiKeyDotClass: apiKeyDot?.className
+    });
+
+    // 只有当 Cookie 和 API Key 都验证成功时才自动折叠配置
+    if (isCookieValid && isApiKeyValid) {
+        console.log('[AutoCollapse] 条件满足，执行折叠');
+        // 使用正确的折叠机制：直接设置内容显示状态
+        const content = document.getElementById('configContent');
+        const arrow = document.getElementById('configCollapseArrow');
+        if (content && configExpanded) {  // 只有当前是展开状态才折叠
+            content.style.display = 'none';
+            if (arrow) arrow.style.transform = 'rotate(0deg)';
+            configExpanded = false;
+            console.log('[AutoCollapse] 配置已折叠');
+        }
     }
 }
 

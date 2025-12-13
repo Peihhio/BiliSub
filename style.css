@@ -1967,19 +1967,65 @@ body {
     padding: 0 var(--space-md);
 }
 
-/* AI处理按钮 */
+/* AI处理按钮 - 文字样式 */
 .video-action-btn.ai-btn {
-    background: rgba(139, 92, 246, 0.1);
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.4);
+    color: var(--accent-secondary);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
 }
 
 .video-action-btn.ai-btn:hover {
-    background: rgba(139, 92, 246, 0.3);
-    color: var(--accent-secondary);
+    background: rgba(139, 92, 246, 0.35);
+    border-color: var(--accent-secondary);
+    color: #fff;
 }
 
 .video-action-btn.ai-btn.processing {
     animation: pulse 1s infinite;
     pointer-events: none;
+}
+
+/* 重试按钮 - 位于卡片右上角 */
+.video-retry-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    border-radius: var(--radius-sm);
+    color: var(--warning);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    z-index: 10;
+}
+
+.video-retry-btn:hover {
+    background: rgba(245, 158, 11, 0.4);
+    border-color: var(--warning);
+    transform: rotate(45deg);
+}
+
+.video-retry-btn svg {
+    width: 14px;
+    height: 14px;
+    transition: var(--transition-fast);
+}
+
+.video-retry-btn:hover svg {
+    transform: rotate(-45deg);
+}
+
+/* 确保卡片是relative定位 */
+.video-item.history-item-card {
+    position: relative;
 }
 
 /* AI处理结果显示 */
@@ -2130,14 +2176,19 @@ body {
 }
 
 .icon-action-btn.ai-batch {
-    background: rgba(139, 92, 246, 0.1);
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.4);
+    color: var(--accent-secondary);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
 }
 
 
 .icon-action-btn.ai-batch:hover:not(:disabled) {
-    background: rgba(139, 92, 246, 0.2);
-    color: var(--accent-secondary);
+    background: rgba(139, 92, 246, 0.35);
     border-color: var(--accent-secondary);
+    color: #fff;
 }
 
 /* 分隔线 */
@@ -3067,4 +3118,44 @@ body {
 
 .guest-quota-display.quota-empty #guestQuotaRemaining {
     color: #ef4444;
+}
+
+/* 提取方式提示 */
+.extraction-mode-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    margin-bottom: var(--space-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.extraction-mode-hint svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.extraction-mode-hint.mode-ok {
+    border-color: var(--success);
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--success);
+}
+
+.extraction-mode-hint.mode-warning {
+    border-color: var(--warning);
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--warning);
+}
+
+.extraction-mode-hint.mode-error {
+    border-color: var(--error);
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error);
 }

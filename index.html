@@ -297,6 +297,16 @@
                     </div>
                 </div>
 
+                <!-- 提取方式提示 -->
+                <div class="extraction-mode-hint" id="extractionModeHint">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                    <span id="extractionModeText">正在检测配置状态...</span>
+                </div>
+
                 <button type="button" id="extractBtn" class="primary-button">
                     <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="5 3 19 12 5 21 5 3" />
@@ -363,11 +373,7 @@
                         <div class="history-actions icon-only">
                             <button type="button" id="currentAiProcessSelected" class="icon-action-btn ai-batch"
                                 title="AI批量处理选中" disabled>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="12" cy="12" r="10" />
-                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                                </svg>
+                                AI
                             </button>
                             <button type="button" id="downloadAllBtn" class="icon-button" title="下载选中" disabled>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -439,11 +445,7 @@
                         <div class="history-actions icon-only">
                             <button type="button" id="historyAiProcessSelected" class="icon-action-btn ai-batch"
                                 title="AI批量处理选中" disabled>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="12" cy="12" r="10" />
-                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                                </svg>
+                                AI
                             </button>
                             <button type="button" id="historyDownloadSelected" class="icon-action-btn" title="下载选中"
                                 disabled>

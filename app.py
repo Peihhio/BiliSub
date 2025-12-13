@@ -875,7 +875,7 @@ def transcribe_audio(audio_path: str, api_key: str, log_collector: LogCollector,
         audio_path: 音频文件路径
         api_key: 阿里云API Key
         log_collector: 日志收集器
-        self_hosted_domain: 自建HTTPS服务域名（如果提供则使用自建服务，否则使用catbox.moe）
+        self_hosted_domain: 自建服务域名（支持HTTP/HTTPS，需公网可访问）
         duration: 音频时长（秒），用于进度估算
     
     Returns:
@@ -901,10 +901,10 @@ def transcribe_audio(audio_path: str, api_key: str, log_collector: LogCollector,
             # 严格检查自建服务
             check_self_hosted_domain(self_hosted_domain, log_collector)
             
-            # 使用自建HTTPS服务
+            # 使用自建服务（HTTP/HTTPS均支持，关键是公网可访问）
             filename = os.path.basename(audio_path)
             file_url = f"{self_hosted_domain.rstrip('/')}/temp_audio/{filename}"
-            log_collector.info(f"使用自建HTTPS服务: {file_url[:50]}...")
+            log_collector.info(f"使用本地直链服务: {file_url[:50]}...")
             
             # 确认文件是否可通过URL访问 (对于 Lucky 模式，实际上此时只是生成URL，文件在本地目录，
             # 但既然是自建，我们假设本地目录已经通过 web server 暴露)
@@ -2509,11 +2509,15 @@ def get_batch_status(batch_id):
     return jsonify({"success": True, "data": status})
 
 
-def process_single_video_task(batch_id, video_index, video_info, api_key, bili_cookie, use_self_hosted, self_hosted_domain):
+def process_single_video_task(batch_id, video_index, video_info, api_key, bili_cookie, use_self_hosted, self_hosted_domain, cookie_valid=True, api_valid=True):
     """
     单个视频处理任务，由线程池调用
+    
+    Args:
+        cookie_valid: Cookie 是否有效，无效时跳过字幕提取直接转录
+        api_valid: API Key 是否有效，无效时字幕提取失败直接标记错误
     """
-    logger.info(f"[Task {video_index}] 任务开始执行: batch={batch_id}")
+    logger.info(f"[Task {video_index}] 任务开始执行: batch={batch_id}, cookie_valid={cookie_valid}, api_valid={api_valid}")
     
     try:
         # 检查任务是否已被取消（在线程池队列等待期间可能被取消）
@@ -2549,21 +2553,35 @@ def process_single_video_task(batch_id, video_index, video_info, api_key, bili_c
         
         transcript = None
         
-        # 2. 尝试获取自带字幕（快速，无需延迟）
-        logger.info(f"[Task {video_index}] 开始获取字幕...")
-        try:
-            transcript = get_bilibili_subtitles(video_url, log_collector, bili_cookie)
-        except Exception as e:
-            logger.warning(f"[Task {video_index}] 获取字幕异常: {e}")
-            if "COOKIE_INVALID" in str(e):
-                raise e
-            log_collector.warning(f"获取B站字幕出错: {e}，尝试使用语音识别")
+        # 2. 根据 cookie_valid 决定是否尝试获取自带字幕
+        if cookie_valid:
+            # Cookie 有效，尝试获取自带字幕
+            logger.info(f"[Task {video_index}] Cookie有效，尝试获取自带字幕...")
+            try:
+                transcript = get_bilibili_subtitles(video_url, log_collector, bili_cookie)
+            except Exception as e:
+                logger.warning(f"[Task {video_index}] 获取字幕异常: {e}")
+                if "COOKIE_INVALID" in str(e):
+                    raise e
+                log_collector.warning(f"获取B站字幕出错: {e}，尝试使用语音识别")
+            
+            if transcript:
+                log_collector.info("成功获取自带字幕")
+                logger.info(f"[Task {video_index}] 字幕获取成功，长度: {len(transcript)}")
+                # 立即完成，无需延迟
+                task_manager.update_video_status(batch_id, video_index, "completed", progress=100, result={"transcript": transcript})
+                return
+        else:
+            # Cookie 无效，跳过字幕提取
+            logger.info(f"[Task {video_index}] Cookie无效，跳过字幕提取，直接使用语音识别")
+            log_collector.info("Cookie无效，跳过字幕提取")
         
-        if transcript:
-            log_collector.info("成功获取自带字幕")
-            logger.info(f"[Task {video_index}] 字幕获取成功，长度: {len(transcript)}")
-            # 立即完成，无需延迟
-            task_manager.update_video_status(batch_id, video_index, "completed", progress=100, result={"transcript": transcript})
+        # 3. 检查是否可以进行语音识别
+        if not api_valid:
+            # API 无效，无法进行语音识别，标记为失败
+            error_msg = "此视频无自带字幕，且 API Key 无效无法进行语音转录"
+            logger.warning(f"[Task {video_index}] {error_msg}")
+            task_manager.update_video_status(batch_id, video_index, "error", error=error_msg)
             return
         
         # 检查是否已取消（在耗时的语音识别开始前检查）
@@ -2572,7 +2590,7 @@ def process_single_video_task(batch_id, video_index, video_info, api_key, bili_c
             task_manager.update_video_status(batch_id, video_index, "cancelled", progress=100)
             return
         
-        # 3. 语音识别流程 - 需要延迟避免 B站 风控
+        # 4. 语音识别流程 - 需要延迟避免 B站 风控
         import time
         import random
         delay = random.uniform(0.5, 1.5)  # 较短延迟，仅在下载音频前
@@ -2626,12 +2644,15 @@ def transcribe_batch():
     bili_cookie = data.get('bili_cookie', '').strip()
     use_self_hosted = data.get('use_self_hosted', False)
     self_hosted_domain = data.get('self_hosted_domain', '').strip()
+    cookie_valid = data.get('cookie_valid', False)  # Cookie 是否有效
+    api_valid = data.get('api_valid', False)  # API Key 是否有效
     
     if not videos:
         return jsonify({"error": "请提供视频列表"}), 400
     
-    if not api_key:
-        return jsonify({"error": "请提供阿里云API Key"}), 400
+    # 至少需要一个有效的配置才能继续
+    if not cookie_valid and not api_valid:
+        return jsonify({"error": "Cookie 和 API Key 均无效，无法提取字幕"}), 400
     
     # === Guest 账户限制 ===
     is_guest = current_user.username == 'guest'
@@ -2703,7 +2724,7 @@ def transcribe_batch():
                     v_idx = task_manager.init_video(batch_id, video)
                     process_single_video_task(
                         batch_id, v_idx, video, api_key, bili_cookie,
-                        use_self_hosted, self_hosted_domain
+                        use_self_hosted, self_hosted_domain, cookie_valid, api_valid
                     )
                 logger.info(f"[Guest] 批次 {batch_id} 处理完成，释放全局锁")
         
@@ -2722,7 +2743,9 @@ def transcribe_batch():
                 api_key,
                 bili_cookie,
                 use_self_hosted,
-                self_hosted_domain
+                self_hosted_domain,
+                cookie_valid,
+                api_valid
             )
         mode = "并发处理 (第三方直链, 5并发)"
     
@@ -2738,9 +2761,11 @@ def transcribe_batch():
                 api_key,
                 bili_cookie,
                 use_self_hosted,
-                self_hosted_domain
+                self_hosted_domain,
+                cookie_valid,
+                api_valid
             )
-        mode = "并发处理 (自建直链, 8并发)"
+        mode = "并发处理 (本地直链, 8并发)"
     
     logger.info(f"[Batch] 批次 {batch_id}: {len(videos)} 个视频, 模式: {mode}")
     
@@ -2764,6 +2789,119 @@ def transcribe_batch():
 def health():
     """健康检查接口"""
     return jsonify({"status": "ok"})
+
+
+# 缓存公网可访问性检测结果
+_public_access_cache = {
+    'result': None,
+    'timestamp': 0,
+    'cache_duration': 600  # 缓存10分钟
+}
+
+
+@app.route('/api/check-public-access', methods=['POST'])
+def check_public_access():
+    """
+    检测服务是否可从公网访问
+    
+    阿里云 Paraformer-v2 要求：
+    - 支持 HTTP 和 HTTPS 协议
+    - 文件 URL 必须是公网可访问的
+    
+    优化后的检测逻辑（支持 Docker/NAT）：
+    - 不再检查本机网卡是否持有公网 IP（Docker 容器内通常没有）
+    - 而是检查用户访问时使用的域名（Origin）是否解析为公网 IP
+    - 如果用户能通过公网域名/IP 访问到这里，且该域名解析为公网 IP，
+      那么我们生成的基于该域名的链接通常也是公网可达的。
+    
+    Returns:
+        {
+            "is_public": true/false,
+            "public_url": "http://x.x.x.x:port" or null,
+            "reason": "检测说明"
+        }
+    """
+    import requests
+    import socket
+    import ipaddress
+    from urllib.parse import urlparse
+    
+    data = request.get_json() or {}
+    origin = data.get('origin', '').strip()
+    force_refresh = data.get('force_refresh', False)
+    
+    # 检查缓存
+    current_time = time.time()
+    if not force_refresh and _public_access_cache['result'] is not None:
+        if current_time - _public_access_cache['timestamp'] < _public_access_cache['cache_duration']:
+            logger.info('[公网检测] 使用缓存结果')
+            return jsonify(_public_access_cache['result'])
+    
+    result = {
+        'is_public': False,
+        'public_url': None,
+        'reason': '未检测'
+    }
+    
+    try:
+        # 步骤1：解析 Origin
+        if not origin:
+            result['reason'] = '无法获取访问地址(Origin)'
+            return jsonify(update_cache(result, current_time))
+            
+        parsed_origin = urlparse(origin)
+        hostname = parsed_origin.hostname
+        port = parsed_origin.port
+        scheme = parsed_origin.scheme
+        
+        if not hostname:
+            result['reason'] = 'Origin 格式错误'
+            return jsonify(update_cache(result, current_time))
+            
+        # 步骤2：解析 Hostname 获取 IP
+        try:
+            origin_ip = socket.gethostbyname(hostname)
+        except Exception as e:
+            result['reason'] = f'域名解析失败: {hostname}'
+            return jsonify(update_cache(result, current_time))
+            
+        # 步骤3：判断 IP 类型
+        try:
+            ip_obj = ipaddress.ip_address(origin_ip)
+            
+            # 使用公网 URL
+            if port:
+                public_url = f"{scheme}://{hostname}:{port}"
+            else:
+                public_url = f"{scheme}://{hostname}"
+            result['public_url'] = public_url
+
+            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved:
+                # 内网或回环 IP -> 判定为不可用
+                result['is_public'] = False
+                result['reason'] = f'检测到内网环境 (访问来源 {hostname} 解析为 {origin_ip})，默认使用第三方直链'
+                logger.info(f'[公网检测] 内网环境: {hostname} -> {origin_ip}')
+            else:
+                # 公网 IP -> 判定为可用
+                # 假设：如果用户能通过公网 IP/域名访问 API，且该域名解析为公网 IP，
+                # 则外部服务（阿里云）也能通过该域名访问静态文件。
+                result['is_public'] = True
+                result['reason'] = f'检测到公网访问 (访问来源 {hostname} 解析为 {origin_ip})，启用本地直链'
+                logger.info(f'[公网检测] 公网环境: {hostname} -> {origin_ip}')
+                
+        except ValueError:
+            result['reason'] = f'无效的 IP 地址: {origin_ip}'
+            
+    except Exception as e:
+        logger.error(f'[公网检测] 检测异常: {e}')
+        result['reason'] = f'检测异常: {str(e)}'
+    
+    return jsonify(update_cache(result, current_time))
+
+def update_cache(result, timestamp):
+    _public_access_cache['result'] = result
+    _public_access_cache['timestamp'] = timestamp
+    return result
 
 
 @app.route('/api/guest_quota')
