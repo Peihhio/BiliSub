@@ -11,8 +11,8 @@ BiliSub 是一个专为笔记党、知识库构建者和 B 站重度用户打造
 ## 📷 界面预览
 
 <p align="center">
-  <img src="docs/images/screenshot_1.jpg" width="45%" alt="界面预览1"/>
-  <img src="docs/images/screenshot_2.jpg" width="45%" alt="界面预览2"/>
+  <img src="https://raw.githubusercontent.com/Peihhio/BiliSub/main/docs/images/screenshot_1.jpg" width="45%" alt="界面预览1"/>
+  <img src="https://raw.githubusercontent.com/Peihhio/BiliSub/main/docs/images/screenshot_2.jpg" width="45%" alt="界面预览2"/>
 </p>
 
 ---
