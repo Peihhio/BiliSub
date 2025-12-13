@@ -106,52 +106,59 @@ executor = ThreadPoolExecutor(max_workers=8)
 third_party_executor = ThreadPoolExecutor(max_workers=5)
 
 # Guest 账户专用配置
-guest_executor = ThreadPoolExecutor(max_workers=1)  # Guest 账户单线程执行
-guest_lock = threading.Lock()  # Guest 全局队列锁，确保多个 guest 用户排队
+guest_executor = ThreadPoolExecutor(max_workers=5)  # Guest 账户5并发执行
 
-# Guest 配额跟踪器
-class GuestQuotaTracker:
-    """跟踪 guest 账户的每日视频提取配额"""
-    DAILY_LIMIT = 5  # 每日最多5个视频
+# Guest 并发控制器
+class GuestConcurrencyController:
+    """
+    控制 guest 账户的全局并发数
+    使用信号量实现，超过限制时自动排队等待
+    """
+    MAX_CONCURRENT = 5  # 最大并发数
     
     def __init__(self):
         self.lock = threading.Lock()
-        self.daily_count = 0
-        self.last_reset_date = None
+        self.semaphore = threading.Semaphore(self.MAX_CONCURRENT)
+        self.current_count = 0
+        self.queue_count = 0  # 排队中的任务数
     
-    def _reset_if_new_day(self):
-        """如果是新的一天，重置计数"""
-        today = datetime.now().date()
-        if self.last_reset_date != today:
-            self.daily_count = 0
-            self.last_reset_date = today
-            logger.info(f"[Guest] 配额已重置，新的一天: {today}")
-    
-    def check_and_consume(self, video_count: int) -> tuple:
+    def acquire(self, batch_id: str, video_idx: int):
         """
-        检查并消费配额
-        返回: (success: bool, remaining: int, message: str)
+        获取一个并发槽位，如果已满则阻塞排队
+        返回: 是否成功获取（任务未被取消）
         """
         with self.lock:
-            self._reset_if_new_day()
-            
-            remaining = self.DAILY_LIMIT - self.daily_count
-            
-            if video_count > remaining:
-                return (False, remaining, f"配额不足：今日剩余 {remaining} 个，请求 {video_count} 个")
-            
-            self.daily_count += video_count
-            new_remaining = self.DAILY_LIMIT - self.daily_count
-            logger.info(f"[Guest] 消费 {video_count} 个配额，剩余 {new_remaining} 个")
-            return (True, new_remaining, "OK")
-    
-    def get_remaining(self) -> int:
-        """获取剩余配额"""
+            self.queue_count += 1
+            logger.info(f"[Guest] 视频 {video_idx} 进入排队，当前排队数: {self.queue_count}")
+        
+        # 阻塞等待获取信号量
+        self.semaphore.acquire()
+        
         with self.lock:
-            self._reset_if_new_day()
-            return self.DAILY_LIMIT - self.daily_count
+            self.queue_count -= 1
+            self.current_count += 1
+            logger.info(f"[Guest] 视频 {video_idx} 获得槽位，当前并发: {self.current_count}/{self.MAX_CONCURRENT}")
+        
+        return True
+    
+    def release(self):
+        """释放一个并发槽位"""
+        with self.lock:
+            self.current_count -= 1
+            current = self.current_count
+        self.semaphore.release()
+        logger.info(f"[Guest] 释放槽位，当前并发: {current}/{self.MAX_CONCURRENT}")
+    
+    def get_status(self):
+        """获取当前状态"""
+        with self.lock:
+            return {
+                "current": self.current_count,
+                "max": self.MAX_CONCURRENT,
+                "queue": self.queue_count
+            }
 
-guest_quota_tracker = GuestQuotaTracker()
+guest_concurrency = GuestConcurrencyController()
 
 class TaskManager:
     def __init__(self):
@@ -2654,25 +2661,14 @@ def transcribe_batch():
     if not cookie_valid and not api_valid:
         return jsonify({"error": "Cookie 和 API Key 均无效，无法提取字幕"}), 400
     
-    # === Guest 账户限制 ===
+    # === Guest 账户标识 ===
     is_guest = current_user.username == 'guest'
-    remaining_quota = -1  # -1 表示无限制
     
-    if is_guest:
-        # 检查并消费配额
-        success, remaining, message = guest_quota_tracker.check_and_consume(len(videos))
-        if not success:
-            return jsonify({
-                "error": f"Guest 账户{message}",
-                "quota_exceeded": True,
-                "remaining": remaining,
-                "daily_limit": GuestQuotaTracker.DAILY_LIMIT
-            }), 403
-        remaining_quota = remaining
+    # Guest 用户不再有配额限制，只有并发限制
     
     # === 优先级排序：有字幕的视频排前面 ===
-    # 仅在视频数量 > 1 且非 Guest 时进行预检测（Guest 按顺序处理，无需排序）
-    if len(videos) > 1 and not is_guest:
+    # 仅在视频数量 > 1 且非 Guest 时进行预检测（Guest 也可以享受排序优化）
+    if len(videos) > 1:
         import re
         from concurrent.futures import ThreadPoolExecutor as CheckExecutor, as_completed
         
@@ -2712,27 +2708,49 @@ def transcribe_batch():
     
     # === 选择执行器和执行方式 ===
     if is_guest:
-        # Guest 用户：完全串行处理，确保公平排队
-        def process_batch_sequentially():
-            with guest_lock:
-                logger.info(f"[Guest] 获得全局锁，开始处理批次 {batch_id}")
-                for video in videos:
-                    # 检查批次是否已取消
-                    if task_manager.is_batch_cancelled(batch_id):
-                        logger.info(f"[Guest] 批次 {batch_id} 已取消，停止处理后续视频")
-                        break
-                    v_idx = task_manager.init_video(batch_id, video)
-                    process_single_video_task(
-                        batch_id, v_idx, video, api_key, bili_cookie,
-                        use_self_hosted, self_hosted_domain, cookie_valid, api_valid
-                    )
-                logger.info(f"[Guest] 批次 {batch_id} 处理完成，释放全局锁")
+        # Guest 用户：使用并发控制器，5并发处理，超过则排队
+        def process_guest_video(video, v_idx, batch_id_local):
+            """Guest 视频处理任务（带并发控制）"""
+            # 检查批次是否已取消
+            if task_manager.is_batch_cancelled(batch_id_local):
+                task_manager.update_video_status(batch_id_local, v_idx, 'cancelled', progress=100)
+                return
+            
+            # 更新状态为排队中
+            task_manager.update_video_status(batch_id_local, v_idx, 'queued', progress=0)
+            
+            # 获取并发槽位（可能阻塞排队）
+            guest_concurrency.acquire(batch_id_local, v_idx)
+            
+            try:
+                # 再次检查是否已取消（可能在排队期间被取消）
+                if task_manager.is_batch_cancelled(batch_id_local):
+                    task_manager.update_video_status(batch_id_local, v_idx, 'cancelled', progress=100)
+                    return
+                
+                # 更新状态为处理中
+                task_manager.update_video_status(batch_id_local, v_idx, 'processing', progress=5)
+                
+                # 执行实际处理
+                process_single_video_task(
+                    batch_id_local, v_idx, video, api_key, bili_cookie,
+                    use_self_hosted, self_hosted_domain, cookie_valid, api_valid
+                )
+            finally:
+                # 释放并发槽位
+                guest_concurrency.release()
         
-        guest_executor.submit(process_batch_sequentially)
-        mode = "顺序处理 (Guest排队)"
+        # 先初始化所有视频状态，然后提交到执行器
+        for video in videos:
+            v_idx = task_manager.init_video(batch_id, video)
+            # 立即标记为排队状态
+            task_manager.update_video_status(batch_id, v_idx, 'queued', progress=0)
+            guest_executor.submit(process_guest_video, video, v_idx, batch_id)
+        
+        mode = "并发处理 (Guest, 5并发排队)"
     
     elif not use_self_hosted:
-        # 第三方直链：使用 2 并发处理，显著提升速度
+        # 第三方直链：使用 5 并发处理
         for video in videos:
             v_idx = task_manager.init_video(batch_id, video)
             third_party_executor.submit(
@@ -2750,7 +2768,7 @@ def transcribe_batch():
         mode = "并发处理 (第三方直链, 5并发)"
     
     else:
-        # 自建服务的非 Guest 用户：5 并发处理
+        # 自建服务的非 Guest 用户：8 并发处理
         for video in videos:
             v_idx = task_manager.init_video(batch_id, video)
             executor.submit(
@@ -2776,10 +2794,10 @@ def transcribe_batch():
         "processing_mode": mode
     }
     
-    # 如果是 Guest，返回剩余配额
+    # Guest 用户返回并发状态
     if is_guest:
-        response_data["remaining_quota"] = remaining_quota
-        response_data["daily_limit"] = GuestQuotaTracker.DAILY_LIMIT
+        status = guest_concurrency.get_status()
+        response_data["concurrent_status"] = status
     
     return jsonify(response_data)
 
@@ -2904,26 +2922,25 @@ def update_cache(result, timestamp):
     return result
 
 
-@app.route('/api/guest_quota')
+@app.route('/api/guest_status')
 @login_required
-def get_guest_quota():
-    """获取 guest 账户剩余配额"""
+def get_guest_status():
+    """获取 guest 账户状态（并发信息）"""
     is_guest = current_user.username == 'guest'
     
     if is_guest:
-        remaining = guest_quota_tracker.get_remaining()
+        status = guest_concurrency.get_status()
         return jsonify({
             "success": True,
             "is_guest": True,
-            "remaining": remaining,
-            "daily_limit": GuestQuotaTracker.DAILY_LIMIT
+            "concurrent": status["current"],
+            "max_concurrent": status["max"],
+            "queue": status["queue"]
         })
     else:
         return jsonify({
             "success": True,
-            "is_guest": False,
-            "remaining": -1,  # -1 表示无限制
-            "daily_limit": -1
+            "is_guest": False
         })
 
 

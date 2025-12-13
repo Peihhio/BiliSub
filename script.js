@@ -244,31 +244,11 @@ function updateStorageUI(useSelfHosted) {
     }
 }
 
-// 初始化
-document.addEventListener('DOMContentLoaded', async () => {
-    // 优先初始化UI交互，避免被后续网络请求阻塞
-    // 自建存储开关
-    const useSelfHostedToggle = document.getElementById('useSelfHostedStorage');
-    const selfHostedConfigDiv = document.getElementById('selfHostedStorageConfig');
-    const selfHostedDomainInput = document.getElementById('selfHostedDomain');
-    const storageHint = document.getElementById('storageHint');
-
-    // 存储模式现在由 loadSavedData 自动检测公网可访问性，无需手动切换\n    console.log('Storage mode will be auto-detected based on public network accessibility');
-
-    // 延迟加载配置，让页面先渲染完成再执行 API 验证
-    // 这样用户可以立即看到并操作界面，验证在后台进行
-    setTimeout(() => {
-        loadSavedData().then(() => {
-            updateConfigStatusSummary();
-        }).catch(error => {
-            console.error('Failed to load saved data:', error);
-            updateConfigStatusSummary();
-        });
-
-        // 获取 Guest 配额信息
-        fetchGuestQuota();
-    }, 300);
-
+/**
+ * 初始化 UI 事件监听器（同步执行，无网络请求）
+ * 这部分代码立即执行，确保页面可交互
+ */
+function initUIEventListeners() {
     if (toggleCookieBtn) {
         toggleCookieBtn.addEventListener('click', toggleCookieVisibility);
     }
@@ -321,39 +301,101 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    videoUrlInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleExtract();
+    if (videoUrlInput) {
+        videoUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleExtract();
+            }
+        });
+    }
+
+    console.log('[Init] UI event listeners bindingcompleted');
+}
+
+/**
+ * 调度后台初始化任务（网络请求、配置验证等）
+ * 使用 requestIdleCallback 让浏览器先完成渲染，再执行后台任务
+ * 
+ * 优化策略：
+ * 1. 所有任务尽可能并行执行
+ * 2. 历史功能在 Guest 状态确定后立即开始（不等配置加载）
+ */
+function scheduleBackgroundInit() {
+    const doBackgroundInit = async () => {
+        console.log('[Init] Starting background initialization...');
+
+        try {
+            // 并行执行所有任务，但历史功能需要在 Guest 状态确定后启动
+            await Promise.all([
+                // 任务1：加载配置并填充UI（验证在内部异步执行）
+                loadSavedData().then(() => {
+                    updateConfigStatusSummary();
+                }).catch(error => {
+                    console.error('Failed to load saved data:', error);
+                    updateConfigStatusSummary();
+                }),
+
+                // 任务2：获取用户状态，完成后立即初始化历史功能
+                fetchGuestQuota().then(() => {
+                    // Guest 状态已确定，立即初始化历史功能
+                    return initHistoryFeature();
+                }).catch(e => console.error('Failed to fetch guest status or init history:', e)),
+
+                // 任务3：加载用户信息显示
+                loadCurrentUser().catch(e => console.error('Failed to load user:', e))
+            ]);
+
+            console.log('[Init] Background initialization completed');
+        } catch (error) {
+            console.error('[Init] Background initialization failed:', error);
         }
-    });
+    };
+
+    // 优先使用 requestIdleCallback（浏览器空闲时执行），降级用 setTimeout
+    if ('requestIdleCallback' in window) {
+        requestIdleCallback(() => doBackgroundInit(), { timeout: 2000 });
+    } else {
+        // 使用 setTimeout 0 让当前渲染任务完成后再执行
+        setTimeout(() => doBackgroundInit(), 0);
+    }
+}
+
+// 主初始化入口 - 唯一的 DOMContentLoaded 监听器
+document.addEventListener('DOMContentLoaded', () => {
+    // 阶段1：立即绑定 UI 事件（同步，无阻塞）
+    initUIEventListeners();
+
+    // 阶段2：调度后台初始化（异步，不阻塞页面渲染）
+    scheduleBackgroundInit();
 });
 
 /**
  * 加载保存的数据（从服务器加载用户配置）
- * 验证顺序：API Key → Cookie → LLM
+ * 优化版本：配置验证完全异步化，不阻塞页面加载
  */
 async function loadSavedData() {
     try {
-        // 从服务器加载用户配置
-        const response = await fetch('/api/load-config');
-        const data = await response.json();
+        // 公网访问检测异步执行，不阻塞配置加载
+        checkPublicAccess().then(publicAccessResult => {
+            updateStorageUI(publicAccessResult.is_public);
+            console.log('[Auto-Storage] Public access check:', publicAccessResult.reason, '=>', publicAccessResult.is_public ? '本地直链' : '第三方直链');
+        }).catch(e => {
+            console.error('[Auto-Storage] 检测失败:', e);
+            updateStorageUI(false);
+        });
 
-        // 检测公网可访问性（替代原来的 HTTPS 协议检测）
-        // 阿里云 Paraformer-v2 同时支持 HTTP 和 HTTPS，关键是要公网可访问
-        const publicAccessResult = await checkPublicAccess();
-        updateStorageUI(publicAccessResult.is_public);
-        console.log('[Auto-Storage] Public access check:', publicAccessResult.reason, '=>', publicAccessResult.is_public ? '本地直链' : '第三方直链');
+        // 直接获取配置（不等待公网检测）
+        const configResponse = await fetch('/api/load-config');
+        const data = await configResponse.json();
 
         if (data.success && data.config) {
             const config = data.config;
 
-            // === 第一步：立即填充所有UI字段（无网络请求） ===
-            // 加载 API Key
+            // === 立即填充所有UI字段（无网络请求） ===
             if (config.api_key && apiKeyInput) {
                 apiKeyInput.value = config.api_key;
             }
 
-            // 加载 Cookie
             if (config.bili_cookie && biliCookieInput) {
                 biliCookieInput.value = config.bili_cookie;
                 if (fullCookieText) {
@@ -361,7 +403,6 @@ async function loadSavedData() {
                 }
             }
 
-            // 加载 LLM 配置
             const llmApiKey = document.getElementById('llmApiKey');
             const llmApiUrl = document.getElementById('llmApiUrl');
             const llmModel = document.getElementById('llmModelName');
@@ -372,53 +413,131 @@ async function loadSavedData() {
             if (llmModel) llmModel.value = config.llm_model || '';
             if (llmPrompt) llmPrompt.value = config.llm_prompt || '';
 
-            // 更新配置摘要（显示灰色状态灯）
+            // 立即更新配置摘要（显示灰色状态灯）
             updateConfigStatusSummary();
 
-            // === 第二步：并行执行验证（提升速度） ===
-            const verificationPromises = [];
+            // === 配置验证完全异步化（不阻塞页面加载） ===
+            // 使用 setTimeout 0 让 UI 先渲染，然后在后台执行验证
+            setTimeout(() => {
+                scheduleConfigVerification(config);
+            }, 0);
 
-            // 1. API Key 验证
-            if (config.api_key) {
-                verificationPromises.push(verifyApiKey(config.api_key));
-            }
-
-            // 2. Cookie 验证
-            if (config.bili_cookie) {
-                verificationPromises.push(verifyCookie(config.bili_cookie));
-            } else {
-                updateCookieStatus(COOKIE_STATUS.NONE);
-            }
-
-            // 3. LLM 验证（使用默认值如果未配置）
-            const effectiveApiKey = config.llm_api_key || config.api_key || '';
-            const effectiveApiUrl = config.llm_api_url || LLM_DEFAULTS.apiUrl;
-            const effectiveModel = config.llm_model || LLM_DEFAULTS.model;
-            const isAllDefault = !config.llm_api_key && !config.llm_api_url && !config.llm_model;
-
-            if (effectiveApiKey) {
-                verificationPromises.push(testLlmConfig(effectiveApiKey, effectiveApiUrl, effectiveModel, isAllDefault));
-            } else {
-                // API Key 为空，大模型显示错误状态
-                updateLlmStatus('error', '未配置');
-            }
-
-            // 并行执行所有验证
-            await Promise.all(verificationPromises);
-
-            // === 第三步：验证完成后检查是否需要展开配置 ===
-            checkConfigExpand();
+            // loadSavedData 立即返回，不等待验证完成
         } else {
-            // 未登录或加载失败，显示默认状态
             updateCookieStatus(COOKIE_STATUS.NONE);
         }
     } catch (error) {
         console.error('加载配置失败:', error);
         updateCookieStatus(COOKIE_STATUS.NONE);
-
-        // 即使加载失败，也检测存储模式（默认使用第三方直链）
         updateStorageUI(false);
     }
+}
+
+/**
+ * 后台执行配置验证（不阻塞页面加载）
+ * 验证完成后更新状态灯，并显示检测进度提示
+ */
+function scheduleConfigVerification(config) {
+    console.log('[Config] 开始后台配置验证...');
+
+    // 显示检测进度提示
+    const checkingHint = document.getElementById('configCheckingHint');
+    const checkingText = document.getElementById('configCheckingText');
+    if (checkingHint) {
+        checkingHint.style.display = 'inline-flex';
+    }
+
+    // 收集所有验证 Promise
+    const verificationPromises = [];
+    let completedCount = 0;
+    const totalCount = (config.api_key ? 1 : 0) +
+        (config.bili_cookie ? 1 : 0) +
+        ((config.llm_api_key || config.api_key) ? 1 : 0);
+
+    // 更新检测进度文字
+    const updateCheckingProgress = () => {
+        if (checkingText) {
+            if (completedCount < totalCount) {
+                checkingText.textContent = `正在检测配置 (${completedCount}/${totalCount})...`;
+            }
+        }
+    };
+
+    // 1. API Key 验证（后台执行）
+    if (config.api_key) {
+        const apiKeyPromise = verifyApiKey(config.api_key).then(valid => {
+            console.log('[Config] API Key 验证完成:', valid ? '有效' : '无效');
+            completedCount++;
+            updateCheckingProgress();
+            updateConfigStatusSummary();
+            checkConfigExpand();
+            return valid;
+        }).catch(e => {
+            console.error('[Config] API Key 验证失败:', e);
+            completedCount++;
+            updateCheckingProgress();
+            return false;
+        });
+        verificationPromises.push(apiKeyPromise);
+    }
+
+    // 2. Cookie 验证（后台执行）
+    if (config.bili_cookie) {
+        const cookiePromise = verifyCookie(config.bili_cookie).then(valid => {
+            console.log('[Config] Cookie 验证完成:', valid ? '有效' : '无效');
+            completedCount++;
+            updateCheckingProgress();
+            updateConfigStatusSummary();
+            checkConfigExpand();
+            return valid;
+        }).catch(e => {
+            console.error('[Config] Cookie 验证失败:', e);
+            completedCount++;
+            updateCheckingProgress();
+            return false;
+        });
+        verificationPromises.push(cookiePromise);
+    } else {
+        updateCookieStatus(COOKIE_STATUS.NONE);
+    }
+
+    // 3. LLM 验证（后台执行）
+    const effectiveApiKey = config.llm_api_key || config.api_key || '';
+    const effectiveApiUrl = config.llm_api_url || LLM_DEFAULTS.apiUrl;
+    const effectiveModel = config.llm_model || LLM_DEFAULTS.model;
+    const isAllDefault = !config.llm_api_key && !config.llm_api_url && !config.llm_model;
+
+    if (effectiveApiKey) {
+        const llmPromise = testLlmConfig(effectiveApiKey, effectiveApiUrl, effectiveModel, isAllDefault).then(valid => {
+            console.log('[Config] LLM 验证完成:', valid ? '有效' : '无效');
+            completedCount++;
+            updateCheckingProgress();
+            updateConfigStatusSummary();
+            return valid;
+        }).catch(e => {
+            console.error('[Config] LLM 验证失败:', e);
+            completedCount++;
+            updateCheckingProgress();
+            return false;
+        });
+        verificationPromises.push(llmPromise);
+    } else {
+        updateLlmStatus('error', '未配置');
+    }
+
+    // 所有验证完成后隐藏检测提示
+    Promise.all(verificationPromises).then(() => {
+        console.log('[Config] 所有配置验证已完成');
+        if (checkingHint) {
+            // 短暂显示"验证完成"后隐藏
+            if (checkingText) {
+                checkingText.textContent = '验证完成';
+            }
+            setTimeout(() => {
+                checkingHint.style.display = 'none';
+            }, 1000);
+        }
+    });
 }
 
 /**
@@ -2544,6 +2663,12 @@ let selectedHistoryId = null;
 
 // 初始化历史任务功能
 async function initHistoryFeature() {
+    // Guest 用户不加载历史数据（历史区域已隐藏）
+    if (isGuestUser) {
+        console.log('[History] Guest 用户，跳过历史功能初始化');
+        return;
+    }
+
     await loadHistoryData();
     renderHistoryList();
 
@@ -2673,7 +2798,14 @@ async function addToHistory(video, transcript, metadata = {}) {
         historyData.unshift(historyItem);
     }
 
-    // 保存到服务器
+    // Guest 用户不保存到服务器（只在当前会话内存中保存）
+    if (isGuestUser) {
+        console.log('[History] Guest 用户，跳过服务器保存');
+        // 不渲染历史列表（Guest 用户隐藏了历史区域）
+        return;
+    }
+
+    // 非 Guest 用户：保存到服务器
     await saveHistoryItem(historyItem);
     renderHistoryList();
 }
@@ -3402,8 +3534,8 @@ function checkAutoCollapse() {
     }
 }
 
-// 在DOMContentLoaded后初始化历史功能
-document.addEventListener('DOMContentLoaded', initHistoryFeature);
+// 历史功能初始化已合并到 scheduleBackgroundInit() 中
+// 不再需要单独的 DOMContentLoaded 监听器
 
 // ============ 用户认证相关 ============
 
@@ -3539,8 +3671,8 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// 页面加载时获取用户信息
-document.addEventListener('DOMContentLoaded', loadCurrentUser);
+// 用户信息加载已合并到 scheduleBackgroundInit() 中
+// 不再需要单独的 DOMContentLoaded 监听器
 
 // ==================== 批量进度轮询功能 ====================
 
@@ -3917,10 +4049,15 @@ function renderBatchProgress(data) {
                 itemDiv.classList.remove('status-completed', 'status-error');
 
                 if (v.status === 'pending') statusText = '等待中';
+                else if (v.status === 'queued') statusText = '排队中';
                 else if (v.status === 'processing') statusText = `处理中 ${v.progress}%`;
                 else if (v.status === 'completed') {
                     statusText = '已完成';
                     itemDiv.classList.add('status-completed');
+                }
+                else if (v.status === 'cancelled') {
+                    statusText = '已取消';
+                    itemDiv.classList.add('status-cancelled');
                 }
                 else if (v.status === 'error') {
                     statusText = `失败: ${v.error}`;
@@ -3935,55 +4072,46 @@ function renderBatchProgress(data) {
 }
 
 /**
- * 获取 Guest 配额信息
+ * 获取 Guest 状态信息（并发状态）
  */
 async function fetchGuestQuota() {
     try {
-        const response = await fetch('/api/guest_quota');
+        const response = await fetch('/api/guest_status');
         if (!response.ok) return;
 
         const data = await response.json();
         if (data.success) {
             isGuestUser = data.is_guest;
             if (isGuestUser) {
-                guestQuotaRemaining = data.remaining;
-                guestQuotaTotal = data.daily_limit;
-                updateGuestQuotaDisplay();
+                // Guest 用户：隐藏历史任务区域
+                const historySection = document.getElementById('historySection');
+                if (historySection) {
+                    historySection.style.display = 'none';
+                }
+
+                // 隐藏配额显示（不再需要）
+                const quotaDisplay = document.getElementById('guestQuotaDisplay');
+                if (quotaDisplay) quotaDisplay.style.display = 'none';
+
+                console.log('[Guest] 已隐藏历史区域，并发限制: ' + data.max_concurrent);
             } else {
-                // 非 Guest 用户，隐藏配额显示
+                // 非 Guest 用户，隐藏配额显示（但显示历史区域）
                 const quotaDisplay = document.getElementById('guestQuotaDisplay');
                 if (quotaDisplay) quotaDisplay.style.display = 'none';
             }
         }
     } catch (error) {
-        console.error('Failed to fetch guest quota:', error);
+        console.error('Failed to fetch guest status:', error);
     }
 }
 
 /**
- * 更新 Guest 配额显示
+ * Guest 用户不需要配额显示，此函数保留但不再使用
  */
 function updateGuestQuotaDisplay() {
+    // Guest 用户不再显示配额，只在终端日志显示并发状态
     const quotaDisplay = document.getElementById('guestQuotaDisplay');
-    const remainingSpan = document.getElementById('guestQuotaRemaining');
-    const totalSpan = document.getElementById('guestQuotaTotal');
-
-    if (!quotaDisplay || !remainingSpan || !totalSpan) return;
-
-    if (!isGuestUser) {
+    if (quotaDisplay) {
         quotaDisplay.style.display = 'none';
-        return;
-    }
-
-    quotaDisplay.style.display = 'inline-flex';
-    remainingSpan.textContent = guestQuotaRemaining;
-    totalSpan.textContent = guestQuotaTotal;
-
-    // 根据剩余配额设置颜色
-    quotaDisplay.classList.remove('quota-low', 'quota-empty');
-    if (guestQuotaRemaining === 0) {
-        quotaDisplay.classList.add('quota-empty');
-    } else if (guestQuotaRemaining <= 2) {
-        quotaDisplay.classList.add('quota-low');
     }
 }
