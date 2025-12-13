@@ -44,7 +44,8 @@
                     </svg>
                 </button>
                 <div class="user-dropdown" id="userDropdown">
-                    <a href="#" onclick="showChangePasswordModal(); return false;">修改密码</a>
+                    <a href="#" id="changePasswordLink" onclick="showChangePasswordModal(); return false;"
+                        style="display: none;">修改密码</a>
                     <a href="/admin" id="adminLink" style="display: none;">管理后台</a>
                     <a href="#" onclick="logout(); return false;" class="logout-link">退出登录</a>
                 </div>

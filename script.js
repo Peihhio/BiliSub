@@ -3550,6 +3550,7 @@ async function loadCurrentUser() {
         if (data.authenticated && data.user) {
             const userNameEl = document.getElementById('userName');
             const adminLinkEl = document.getElementById('adminLink');
+            const changePasswordLinkEl = document.getElementById('changePasswordLink');
 
             if (userNameEl) {
                 userNameEl.textContent = data.user.username;
@@ -3557,6 +3558,15 @@ async function loadCurrentUser() {
 
             if (adminLinkEl && data.user.is_admin) {
                 adminLinkEl.style.display = 'block';
+            }
+
+            // Guest 用户不能修改密码，隐藏修改密码链接
+            if (changePasswordLinkEl) {
+                if (data.user.username === 'guest') {
+                    changePasswordLinkEl.style.display = 'none';
+                } else {
+                    changePasswordLinkEl.style.display = 'block';
+                }
             }
         }
     } catch (error) {
