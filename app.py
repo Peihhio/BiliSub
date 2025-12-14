@@ -4138,17 +4138,43 @@ def extension_save_ai_result(bvid):
     data = request.get_json() or {}
     ai_result = data.get('ai_result', '')
     
+    logger.info(f"[Extension] 用户 {user.username} 保存 AI 对话: bvid={bvid}")
+    
     history = HistoryItem.query.filter_by(user_id=user.id, bvid=bvid).first()
     if not history:
-        return jsonify({'success': False, 'error': '历史记录不存在'}), 404
+        # 如果历史记录不存在，尝试从插件任务中获取信息并创建
+        logger.warning(f"[Extension] 历史记录不存在，尝试创建: bvid={bvid}")
+        from models import ExtensionTask
+        task = ExtensionTask.query.filter_by(user_id=user.id, bvid=bvid).first()
+        if task and task.transcript:
+            # 基于任务信息创建历史记录
+            history = HistoryItem(
+                user_id=user.id,
+                url=f"https://www.bilibili.com/video/{bvid}",
+                bvid=bvid,
+                title=task.title or bvid,
+                cover=task.cover,
+                owner=task.owner,
+                transcript=task.transcript,
+                ai_result=ai_result
+            )
+            db.session.add(history)
+            db.session.commit()
+            logger.info(f"[Extension] 已创建历史记录并保存 AI 对话: bvid={bvid}")
+            return jsonify({'success': True, 'created': True})
+        else:
+            logger.error(f"[Extension] 无法找到任务或历史记录: bvid={bvid}")
+            return jsonify({'success': False, 'error': '历史记录不存在，且无法从任务创建'}), 404
     
     try:
         history.ai_result = ai_result
         history.updated_at = datetime.utcnow()
         db.session.commit()
+        logger.info(f"[Extension] AI 对话已保存: bvid={bvid}")
         return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
+        logger.error(f"[Extension] 保存 AI 对话失败: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
