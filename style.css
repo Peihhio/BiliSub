@@ -3264,15 +3264,51 @@ body {
 }
 
 .extension-tasks-grid {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-md);
     max-height: 400px;
     overflow-y: auto;
 }
 
-/* 插件任务卡片完全继承当前任务/历史任务的样式，不做任何覆盖 */
+/* 响应式：小屏幕时减少列数 */
+@media (max-width: 1200px) {
+    .extension-tasks-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
 
+@media (max-width: 768px) {
+    .extension-tasks-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 插件任务卡片：紧凑样式适配3列布局 */
+.extension-tasks-grid .video-item.history-item-card {
+    flex-direction: row;
+    padding: var(--space-sm);
+}
+
+.extension-tasks-grid .video-item.history-item-card .video-cover {
+    width: 80px;
+    min-width: 80px;
+    height: 50px;
+}
+
+.extension-tasks-grid .video-item.history-item-card .video-info-wrapper {
+    flex: 1;
+    min-width: 0;
+}
+
+.extension-tasks-grid .video-item.history-item-card .video-title {
+    font-size: 0.85rem;
+    -webkit-line-clamp: 1;
+}
+
+.extension-tasks-grid .video-item.history-item-card .video-author {
+    font-size: 0.75rem;
+}
 
 .extension-task-card {
     background: var(--bg-secondary);

@@ -4018,8 +4018,8 @@ def clear_failed_extension_tasks():
         from models import ExtensionTask
         from datetime import timedelta
         
-        # 超过10分钟未更新的进行中任务视为卡住
-        stuck_threshold = datetime.utcnow() - timedelta(minutes=10)
+        # 超过1分钟未更新的进行中任务视为卡住（允许用户快速清除）
+        stuck_threshold = datetime.utcnow() - timedelta(minutes=1)
         
         # 删除失败、取消的任务
         deleted_failed = ExtensionTask.query.filter(
