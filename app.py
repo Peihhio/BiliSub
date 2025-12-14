@@ -3728,15 +3728,24 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                         stage_desc="准备上传")
                     
                     # 语音识别 (45-90%)
-                    use_self_hosted = user.use_self_hosted
-                    self_hosted_domain = user.self_hosted_domain if use_self_hosted else None
+                    # 使用公网检测，与网站端一致（而非 user.use_self_hosted）
+                    # 检查缓存的公网检测结果
+                    use_local_url = False
+                    self_hosted_domain = None
+                    
+                    if _public_access_cache.get('result') and _public_access_cache['result'].get('is_public'):
+                        use_local_url = True
+                        self_hosted_domain = _public_access_cache['result'].get('public_url')
+                        logger.info(f"[extension] [{bvid}] 使用本地直链: {self_hosted_domain}")
+                    else:
+                        logger.info(f"[extension] [{bvid}] 本地直链不可用，使用第三方直链")
                     
                     extension_task_manager.update_task(task_id,
                         status=ExtensionTaskManager.STATUS_TRANSCRIBING,
                         progress=48,
                         stage_desc="语音识别中")
                     
-                    logger.info(f"[extension] [{bvid}] 开始语音识别，self_hosted={use_self_hosted}")
+                    logger.info(f"[extension] [{bvid}] 开始语音识别")
                     
                     # 创建带进度回调的日志收集器
                     # 注意：LogCollector 的 progress_callback 接收一个字典参数

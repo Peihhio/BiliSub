@@ -4201,12 +4201,18 @@ function renderExtensionTasks(tasks) {
         const statusClass = isFailed ? 'status-error' : '';
         const progressWidth = isFailed ? 100 : task.progress;
 
-        // 构建状态文本（包含百分比）
+        // 构建状态文本（如果stage_desc已包含百分比则不再追加）
         let statusText = '';
         if (isFailed) {
             statusText = '❌ ' + (task.error || '处理失败');
         } else {
-            statusText = `${task.stage_desc || getStageText(task.status)} ${task.progress}%`;
+            const desc = task.stage_desc || getStageText(task.status);
+            // 如果描述已包含百分比，则直接使用；否则追加
+            if (desc.includes('%')) {
+                statusText = desc;
+            } else {
+                statusText = `${desc} ${task.progress}%`;
+            }
         }
 
         return `
