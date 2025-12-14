@@ -4127,7 +4127,7 @@ def extension_check_history(bvid):
 @extension_auth_required
 def extension_save_ai_result(bvid):
     """
-    保存 AI 对话结果到历史记录
+    保存 AI 对话结果到历史记录（保存到 ai_chat 字段）
     
     请求体: {"ai_result": "对话内容"}
     """
@@ -4136,7 +4136,7 @@ def extension_save_ai_result(bvid):
     
     user = g.extension_user
     data = request.get_json() or {}
-    ai_result = data.get('ai_result', '')
+    ai_chat = data.get('ai_result', '')  # 前端发送 ai_result 但我们保存到 ai_chat
     
     logger.info(f"[Extension] 用户 {user.username} 保存 AI 对话: bvid={bvid}")
     
@@ -4147,7 +4147,6 @@ def extension_save_ai_result(bvid):
         from models import ExtensionTask
         task = ExtensionTask.query.filter_by(user_id=user.id, bvid=bvid).first()
         if task and task.transcript:
-            # 基于任务信息创建历史记录
             history = HistoryItem(
                 user_id=user.id,
                 url=f"https://www.bilibili.com/video/{bvid}",
@@ -4156,7 +4155,7 @@ def extension_save_ai_result(bvid):
                 cover=task.cover,
                 owner=task.owner,
                 transcript=task.transcript,
-                ai_result=ai_result
+                ai_chat=ai_chat
             )
             db.session.add(history)
             db.session.commit()
@@ -4167,7 +4166,7 @@ def extension_save_ai_result(bvid):
             return jsonify({'success': False, 'error': '历史记录不存在，且无法从任务创建'}), 404
     
     try:
-        history.ai_result = ai_result
+        history.ai_chat = ai_chat
         history.updated_at = datetime.utcnow()
         db.session.commit()
         logger.info(f"[Extension] AI 对话已保存: bvid={bvid}")
@@ -4175,6 +4174,84 @@ def extension_save_ai_result(bvid):
     except Exception as e:
         db.session.rollback()
         logger.error(f"[Extension] 保存 AI 对话失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/extension/history/<bvid>/summary', methods=['POST'])
+@extension_auth_required
+def extension_update_ai_summary(bvid):
+    """
+    更新 AI 处理结果（ai_summary）
+    
+    请求体: {"ai_summary": "处理结果"}
+    """
+    from flask import g
+    from models import HistoryItem
+    
+    user = g.extension_user
+    data = request.get_json() or {}
+    ai_summary = data.get('ai_summary', '')
+    
+    history = HistoryItem.query.filter_by(user_id=user.id, bvid=bvid).first()
+    if not history:
+        return jsonify({'success': False, 'error': '历史记录不存在'}), 404
+    
+    try:
+        history.ai_summary = ai_summary
+        history.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/extension/history/<bvid>/chat', methods=['DELETE'])
+@extension_auth_required
+def extension_clear_ai_chat(bvid):
+    """
+    清空 AI 对话历史（仅清空 ai_chat，保留 ai_summary）
+    """
+    from flask import g
+    from models import HistoryItem
+    
+    user = g.extension_user
+    
+    history = HistoryItem.query.filter_by(user_id=user.id, bvid=bvid).first()
+    if not history:
+        return jsonify({'success': False, 'error': '历史记录不存在'}), 404
+    
+    try:
+        history.ai_chat = ''
+        history.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# 网站端 API - 更新 AI 处理结果
+@app.route('/api/history/<int:id>/ai-summary', methods=['POST'])
+@login_required
+def update_history_ai_summary(id):
+    """更新历史记录的 AI 处理结果（仅更新上半部分）"""
+    from models import HistoryItem
+    
+    history = HistoryItem.query.filter_by(id=id, user_id=current_user.id).first()
+    if not history:
+        return jsonify({'success': False, 'error': '历史记录不存在'}), 404
+    
+    data = request.get_json() or {}
+    ai_summary = data.get('ai_summary', '')
+    
+    try:
+        history.ai_summary = ai_summary
+        history.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'success': True, 'ai_summary': ai_summary})
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

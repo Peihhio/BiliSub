@@ -89,7 +89,9 @@ class HistoryItem(db.Model):
     
     # 处理结果
     transcript = db.Column(db.Text, nullable=True)  # 字幕文本
-    ai_result = db.Column(db.Text, nullable=True)  # AI 处理结果
+    ai_result = db.Column(db.Text, nullable=True)  # AI 处理结果（兼容旧版本）
+    ai_summary = db.Column(db.Text, nullable=True)  # AI 处理结果（基于提示词）
+    ai_chat = db.Column(db.Text, nullable=True)  # AI 对话历史
     
     # 时间戳
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -110,6 +112,8 @@ class HistoryItem(db.Model):
             'tags': json.loads(self.tags) if self.tags else [],
             'transcript': self.transcript,
             'ai_result': self.ai_result,
+            'ai_summary': self.ai_summary or self.ai_result or '',  # 优先返回新字段，兼容旧数据
+            'ai_chat': self.ai_chat or '',
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -198,6 +202,7 @@ def init_database(app):
         
         # 数据库迁移：检查并添加缺失的列
         _migrate_extension_tasks_table()
+        _migrate_history_items_table()
         
         # 检查是否存在管理员账户
         admin = User.query.filter_by(username='admin').first()
@@ -257,3 +262,37 @@ def _migrate_extension_tasks_table():
     except Exception as e:
         print(f'[WARNING] 数据库迁移失败: {e}')
 
+
+def _migrate_history_items_table():
+    """检查并添加 history_items 表中缺失的列（AI 分区功能）"""
+    try:
+        # 检查表是否存在
+        result = db.session.execute(db.text("SELECT name FROM sqlite_master WHERE type='table' AND name='history_items'"))
+        if not result.fetchone():
+            return  # 表不存在，create_all 会创建
+        
+        # 获取现有列
+        result = db.session.execute(db.text("PRAGMA table_info(history_items)"))
+        existing_columns = {row[1] for row in result.fetchall()}
+        
+        # 需要添加的列
+        migrations = [
+            ('ai_summary', 'TEXT'),
+            ('ai_chat', 'TEXT'),
+        ]
+        
+        for column_name, column_type in migrations:
+            if column_name not in existing_columns:
+                db.session.execute(db.text(f"ALTER TABLE history_items ADD COLUMN {column_name} {column_type}"))
+                print(f'[INFO] 数据库迁移: 添加列 history_items.{column_name}')
+        
+        # 数据迁移：将现有 ai_result 复制到 ai_summary（如果 ai_summary 为空）
+        if 'ai_summary' not in existing_columns:
+            db.session.execute(db.text(
+                "UPDATE history_items SET ai_summary = ai_result WHERE ai_result IS NOT NULL AND ai_result != ''"
+            ))
+            print('[INFO] 数据库迁移: 已将现有 ai_result 复制到 ai_summary')
+        
+        db.session.commit()
+    except Exception as e:
+        print(f'[WARNING] history_items 数据库迁移失败: {e}')
