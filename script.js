@@ -4343,8 +4343,8 @@ function renderExtensionTasks(tasks) {
         // 封面图：优先使用任务中的封面，否则使用占位符
         const coverUrl = task.cover || `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Crect fill='%23333' width='160' height='100'/%3E%3Ctext x='50%25' y='50%25' fill='%23666' text-anchor='middle' dy='.3em' font-size='24'%3E🔌%3C/text%3E%3C/svg%3E`;
 
-        // UP主信息
-        const ownerText = task.owner ? `UP主: ${escapeHtml(task.owner)}` : stageDesc;
+        // UP主信息（始终显示 UP主，不显示阶段信息）
+        const ownerText = task.owner ? `UP主: ${escapeHtml(task.owner)}` : 'UP主: 未知';
 
         // 使用与 renderVideoList 完全一致的卡片结构
         return `
