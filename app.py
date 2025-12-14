@@ -421,7 +421,7 @@ class ExtensionTaskManager:
     
     def update_task(self, task_id: str, status: str = None, progress: int = None, 
                     transcript: str = None, transcript_with_timestamps: list = None,
-                    error: str = None):
+                    error: str = None, stage_desc: str = None):
         """更新任务状态并同步到数据库"""
         with self.lock:
             if task_id not in self.tasks:
@@ -435,7 +435,11 @@ class ExtensionTaskManager:
             task = self.tasks[task_id]
             if status:
                 task["status"] = status
-                task["stage_desc"] = self.STAGE_DESC.get(status, status)
+                # 如果没有提供 stage_desc，则使用默认描述
+                if not stage_desc:
+                    task["stage_desc"] = self.STAGE_DESC.get(status, status)
+            if stage_desc:
+                task["stage_desc"] = stage_desc
             if progress is not None:
                 task["progress"] = progress
             if transcript is not None:
