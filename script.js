@@ -4357,7 +4357,6 @@ function renderExtensionTasks(tasks) {
                 <div class="video-info-wrapper">
                     <div class="video-title-area">
                         <span class="video-title" title="${escapeHtml(task.title)}">${escapeHtml(task.title || task.bvid)}</span>
-                        ${statusBadge}
                     </div>
                     <div class="video-meta-area">
                         <span class="video-author">${ownerText}</span>
@@ -4380,6 +4379,7 @@ function renderExtensionTasks(tasks) {
                             </button>
                             ` : ''}
                         </div>
+                        ${statusBadge}
                     </div>
                 </div>
                 <div class="video-card-progress ${progressBarClass}">

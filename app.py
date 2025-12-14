@@ -3745,6 +3745,7 @@ def extension_create_batch_tasks():
         data = request.get_json() or {}
         videos = data.get('videos', [])
         collection_title = data.get('collection_title', '合集提取')
+        use_asr = data.get('use_asr', True)  # 默认开启语音识别
         
         if not videos:
             return jsonify({'success': False, 'error': '缺少 videos 参数'}), 400
@@ -3782,7 +3783,7 @@ def extension_create_batch_tasks():
                 title=title,
                 cover=cover,
                 owner=owner,
-                use_asr=False
+                use_asr=use_asr
             )
             
             task = extension_task_manager.get_task(task_id)
@@ -3794,7 +3795,7 @@ def extension_create_batch_tasks():
                     task_id,
                     user.id,
                     bvid,
-                    False,  # use_asr
+                    use_asr,
                     origin_url
                 )
                 created_count += 1
