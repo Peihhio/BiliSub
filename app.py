@@ -4179,6 +4179,96 @@ def delete_extension_task(task_id):
         logger.error(f"[extension] 删除任务出错: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/extension/subtitle/save', methods=['POST'])
+@extension_auth_required
+def extension_save_subtitle():
+    """
+    插件直接上传字幕（用于插件端提取的自带字幕）
+    
+    请求头: X-Extension-Token
+    请求体: {
+        "bvid": "BV1xxx",
+        "title": "视频标题",
+        "cover": "https://...",
+        "owner": "UP主",
+        "transcript": "字幕内容...",
+        "source": "plugin"
+    }
+    响应: {"success": true, "message": "字幕已保存"}
+    """
+    from flask import g
+    from models import HistoryItem
+    
+    user = g.extension_user
+    
+    try:
+        data = request.get_json() or {}
+        bvid = data.get('bvid', '').strip()
+        title = data.get('title', '')
+        cover = data.get('cover', '')
+        owner = data.get('owner', '')
+        transcript = data.get('transcript', '')
+        source = data.get('source', 'plugin')
+        
+        if not bvid:
+            return jsonify({'success': False, 'error': '缺少 bvid 参数'}), 400
+        
+        if not transcript:
+            return jsonify({'success': False, 'error': '缺少 transcript 参数'}), 400
+        
+        # 检查是否已有历史记录
+        history = HistoryItem.query.filter_by(user_id=user.id, bvid=bvid).first()
+        
+        if history:
+            # 更新现有记录（只有在没有字幕时才更新）
+            if not history.transcript:
+                history.transcript = transcript
+                history.title = title or history.title
+                history.cover = cover or history.cover
+                history.owner = owner or history.owner
+                db.session.commit()
+                logger.info(f"[extension] 插件上传字幕更新历史: bvid={bvid}, source={source}")
+        else:
+            # 创建新记录
+            history = HistoryItem(
+                user_id=user.id,
+                url=f"https://www.bilibili.com/video/{bvid}",
+                bvid=bvid,
+                title=title,
+                cover=cover,
+                owner=owner,
+                transcript=transcript
+            )
+            db.session.add(history)
+            db.session.commit()
+            logger.info(f"[extension] 插件上传字幕创建历史: bvid={bvid}, source={source}")
+        
+        # 如果有正在进行的任务，标记为已完成
+        task = extension_task_manager.get_task_by_bvid(user.id, bvid)
+        if task and task.get('status') not in [ExtensionTaskManager.STATUS_COMPLETED,
+                                                 ExtensionTaskManager.STATUS_FAILED,
+                                                 ExtensionTaskManager.STATUS_CANCELLED]:
+            extension_task_manager.update_task(
+                task['task_id'],
+                status=ExtensionTaskManager.STATUS_COMPLETED,
+                progress=100,
+                stage_desc=f"插件已提取 ({source})",
+                transcript=transcript
+            )
+            logger.info(f"[extension] 插件上传字幕完成任务: task_id={task['task_id']}")
+        
+        return jsonify({
+            'success': True,
+            'message': '字幕已保存',
+            'source': source
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[extension] 插件上传字幕失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/extension/history/<bvid>', methods=['GET'])
 @extension_auth_required
 def extension_check_history(bvid):
