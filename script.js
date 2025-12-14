@@ -4204,19 +4204,10 @@ function renderExtensionTasks(tasks) {
 
     if (!section || !grid) return;
 
-    // 过滤显示：进行中的任务 + 最近1小时内失败的任务
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    // 过滤显示：显示所有非完成的任务（包括进行中、失败、取消的，由用户手动删除）
     const visibleTasks = tasks.filter(task => {
-        // 进行中的任务始终显示
-        if (!['completed', 'failed', 'cancelled'].includes(task.status)) {
-            return true;
-        }
-        // 失败的任务：1小时内显示
-        if (task.status === 'failed' && task.created_at) {
-            const createdAt = new Date(task.created_at);
-            return createdAt > oneHourAgo;
-        }
-        return false;
+        // 完成的任务不显示（它们会进入历史）
+        return task.status !== 'completed';
     });
 
     // 如果没有任务，隐藏区域
@@ -4283,6 +4274,14 @@ function renderExtensionTasks(tasks) {
                     <div class="video-meta-area">
                         <span class="video-author">${ownerText}</span>
                         <div class="video-actions">
+                            <button class="video-action-btn" title="查看原视频"
+                                    onclick="event.stopPropagation(); window.open('https://www.bilibili.com/video/${task.bvid}', '_blank')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                    <polyline points="15 3 21 3 21 9"/>
+                                    <line x1="10" y1="14" x2="21" y2="3"/>
+                                </svg>
+                            </button>
                             ${!['completed'].includes(task.status) ? `
                             <button class="video-action-btn danger" title="删除任务"
                                     onclick="event.stopPropagation(); deleteExtensionTask('${task.task_id}')">
@@ -4292,14 +4291,6 @@ function renderExtensionTasks(tasks) {
                                 </svg>
                             </button>
                             ` : ''}
-                            <button class="video-action-btn" title="查看原视频"
-                                    onclick="event.stopPropagation(); window.open('https://www.bilibili.com/video/${task.bvid}', '_blank')">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                                    <polyline points="15 3 21 3 21 9"/>
-                                    <line x1="10" y1="14" x2="21" y2="3"/>
-                                </svg>
-                            </button>
                         </div>
                     </div>
                 </div>

@@ -3294,19 +3294,7 @@ body {
 
 /* 插件任务卡片：紧凑样式适配3列布局 */
 .extension-tasks-grid .video-item.history-item-card {
-    flex-direction: row;
     padding: var(--space-sm);
-}
-
-.extension-tasks-grid .video-item.history-item-card .video-cover {
-    width: 80px;
-    min-width: 80px;
-    height: 50px;
-}
-
-.extension-tasks-grid .video-item.history-item-card .video-info-wrapper {
-    flex: 1;
-    min-width: 0;
 }
 
 .extension-tasks-grid .video-item.history-item-card .video-title {
