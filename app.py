@@ -3728,27 +3728,22 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                         stage_desc="准备上传")
                     
                     # 语音识别 (45-90%)
-                    # 主动检测公网可访问性，与网站端一致
+                    # 简化直链检测：HTTPS 访问意味着服务器一定是公网可达的
+                    # 因此只要缓存中有 public_url，就使用它（不管缓存是否过期）
                     self_hosted_domain = None
                     
-                    # 检查缓存或重新检测
-                    import time as time_module
-                    current_time = time_module.time()
-                    cache_valid = (
-                        _public_access_cache.get('result') is not None and 
-                        current_time - _public_access_cache.get('timestamp', 0) < _public_access_cache.get('cache_duration', 600)
-                    )
-                    
-                    if cache_valid and _public_access_cache['result'].get('is_public'):
-                        self_hosted_domain = _public_access_cache['result'].get('public_url')
+                    # 优先使用缓存的 public_url（即使缓存过期也可用，因为 HTTPS 环境下一定是公网可达）
+                    cached_result = _public_access_cache.get('result')
+                    if cached_result and cached_result.get('is_public') and cached_result.get('public_url'):
+                        self_hosted_domain = cached_result.get('public_url')
                         logger.info(f"[extension] [{bvid}] 使用本地直链(缓存): {self_hosted_domain}")
+                    # 其次使用用户配置的 self_hosted_domain
+                    elif user.use_self_hosted and user.self_hosted_domain:
+                        self_hosted_domain = user.self_hosted_domain
+                        logger.info(f"[extension] [{bvid}] 使用用户配置的直链: {self_hosted_domain}")
+                    # 最后尝试从请求中推断（如果有 Origin 缓存）
                     else:
-                        # 尝试使用用户配置的 self_hosted_domain
-                        if user.use_self_hosted and user.self_hosted_domain:
-                            self_hosted_domain = user.self_hosted_domain
-                            logger.info(f"[extension] [{bvid}] 使用用户配置的直链: {self_hosted_domain}")
-                        else:
-                            logger.info(f"[extension] [{bvid}] 本地直链不可用，使用第三方直链")
+                        logger.info(f"[extension] [{bvid}] 本地直链不可用，使用第三方直链")
 
                     
                     extension_task_manager.update_task(task_id,

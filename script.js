@@ -574,9 +574,14 @@ async function checkPublicAccess() {
 }
 
 /**
- * 验证 API Key
+ * 验证 API Key（带重试机制）
+ * @param {string} apiKey - API Key
+ * @param {number} retryCount - 当前重试次数（内部使用）
  */
-async function verifyApiKey(apiKey) {
+async function verifyApiKey(apiKey, retryCount = 0) {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000; // 2秒
+
     if (!apiKey) return false;
 
     try {
@@ -607,7 +612,15 @@ async function verifyApiKey(apiKey) {
             return false;
         }
     } catch (error) {
-        console.error('API Key 验证失败:', error);
+        console.error(`API Key 验证失败 (尝试 ${retryCount + 1}/${MAX_RETRIES}):`, error);
+
+        // 如果是网络错误且还有重试次数，则重试
+        if (retryCount < MAX_RETRIES - 1) {
+            console.log(`[API Key] ${RETRY_DELAY / 1000}秒后重试...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            return verifyApiKey(apiKey, retryCount + 1);
+        }
+
         const apiKeyStatusDot = document.getElementById('apiKeyStatusDot');
         if (apiKeyStatusDot) {
             apiKeyStatusDot.className = 'status-dot status-error';
@@ -1219,9 +1232,14 @@ function checkCookieFields(cookie) {
 }
 
 /**
- * 验证Cookie有效性
+ * 验证Cookie有效性（带重试机制）
+ * @param {string} cookie - Cookie 字符串
+ * @param {number} retryCount - 当前重试次数（内部使用）
  */
-async function verifyCookie(cookie) {
+async function verifyCookie(cookie, retryCount = 0) {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000; // 2秒
+
     if (!cookie) {
         updateCookieStatus(COOKIE_STATUS.NONE);
         return false;
@@ -1255,7 +1273,15 @@ async function verifyCookie(cookie) {
             return false;
         }
     } catch (error) {
-        console.error('验证Cookie失败:', error);
+        console.error(`验证Cookie失败 (尝试 ${retryCount + 1}/${MAX_RETRIES}):`, error);
+
+        // 如果是网络错误且还有重试次数，则重试
+        if (retryCount < MAX_RETRIES - 1) {
+            console.log(`[Cookie] ${RETRY_DELAY / 1000}秒后重试...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            return verifyCookie(cookie, retryCount + 1);
+        }
+
         updateCookieStatus(COOKIE_STATUS.INVALID);
         return false;
     }
@@ -4195,34 +4221,63 @@ function renderExtensionTasks(tasks) {
         countEl.textContent = countText || '无任务';
     }
 
-    // 渲染卡片（使用与批处理一致的结构）
+    // 渲染卡片（使用与当前任务一致的样式结构）
     grid.innerHTML = visibleTasks.map(task => {
         const isFailed = task.status === 'failed';
-        const statusClass = isFailed ? 'status-error' : '';
-        const progressWidth = isFailed ? 100 : task.progress;
+        const progressPercent = isFailed ? 100 : (task.progress || 0);
 
-        // 构建状态文本（如果stage_desc已包含百分比则不再追加）
+        // 确定进度条样式类
+        let progressBarClass = '';
+        if (isFailed) {
+            progressBarClass = 'error';
+        } else if (task.status === 'completed') {
+            progressBarClass = 'completed';
+        } else if (task.status !== 'pending') {
+            progressBarClass = 'processing';
+        }
+
+        // 构建状态徽章
+        let statusBadge = '';
+        if (isFailed) {
+            statusBadge = '<span class="video-result-badge error">提取失败</span>';
+        } else if (task.status === 'completed') {
+            statusBadge = '<span class="video-result-badge success">已完成</span>';
+        }
+
+        // 构建状态文本（修复：只显示一个百分数）
         let statusText = '';
         if (isFailed) {
-            statusText = '❌ ' + (task.error || '处理失败');
+            statusText = task.error || '处理失败';
         } else {
             const desc = task.stage_desc || getStageText(task.status);
-            // 如果描述已包含百分比，则直接使用；否则追加
-            if (desc.includes('%')) {
+            // 检查描述是否已包含百分比（匹配数字+%）
+            if (/\d+%/.test(desc)) {
+                // 描述已包含百分比，直接使用
                 statusText = desc;
             } else {
-                statusText = `${desc} ${task.progress}%`;
+                // 描述不包含百分比，追加进度
+                statusText = `${desc} ${progressPercent}%`;
             }
         }
 
+        // 使用与当前任务一致的卡片结构
         return `
-            <div class="batch-video-item ${statusClass}" data-bvid="${task.bvid}">
-                <div class="video-info">
-                    <span class="video-title" title="${escapeHtml(task.title)}">${escapeHtml(task.title || task.bvid)}</span>
-                    <span class="video-status">${statusText}</span>
+            <div class="video-item history-item-card extension-task-item" data-bvid="${task.bvid}">
+                <div class="video-cover">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Crect fill='%23333' width='160' height='100'/%3E%3Ctext x='50%25' y='50%25' fill='%23666' text-anchor='middle' dy='.3em'%3E🔌%3C/text%3E%3C/svg%3E" 
+                         alt="插件任务" loading="lazy">
                 </div>
-                <div class="mini-progress-bar">
-                    <div class="bar" style="width: ${progressWidth}%"></div>
+                <div class="video-info-wrapper">
+                    <div class="video-title-area">
+                        <span class="video-title" title="${escapeHtml(task.title)}">${escapeHtml(task.title || task.bvid)}</span>
+                        ${statusBadge}
+                    </div>
+                    <div class="video-meta-area">
+                        <span class="video-author">${statusText}</span>
+                    </div>
+                </div>
+                <div class="video-card-progress ${progressBarClass}">
+                    <div class="video-card-progress-fill" style="width: ${progressPercent}%"></div>
                 </div>
             </div>
         `;

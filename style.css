@@ -3234,21 +3234,30 @@ body {
 }
 
 .extension-tasks-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    max-height: 400px;
+    overflow-y: auto;
 }
 
-@media (max-width: 900px) {
-    .extension-tasks-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
+/* 插件任务卡片使用与当前任务一致的样式 */
+.extension-tasks-grid .video-item.history-item-card {
+    position: relative;
+    overflow: hidden;
 }
 
-@media (max-width: 600px) {
-    .extension-tasks-grid {
-        grid-template-columns: 1fr;
-    }
+.extension-tasks-grid .video-item.history-item-card .video-cover {
+    width: 80px;
+    height: 50px;
+    flex-shrink: 0;
+}
+
+.extension-tasks-grid .video-item.history-item-card .video-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
 }
 
 .extension-task-card {
