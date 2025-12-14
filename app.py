@@ -3722,6 +3722,100 @@ def extension_create_task():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/extension/tasks/batch', methods=['POST'])
+@extension_auth_required
+def extension_create_batch_tasks():
+    """
+    批量创建字幕提取任务（用于合集提取）
+    
+    请求头: X-Extension-Token
+    请求体: {
+        "videos": [
+            {"bvid": "BV1xxx", "title": "视频1", "cover": "url"},
+            {"bvid": "BV2xxx", "title": "视频2", "cover": "url"}
+        ],
+        "collection_title": "合集名称"
+    }
+    响应: {"success": true, "created": 5, "skipped": 2, "task_ids": [...]}
+    """
+    from flask import g
+    user = g.extension_user
+    
+    try:
+        data = request.get_json() or {}
+        videos = data.get('videos', [])
+        collection_title = data.get('collection_title', '合集提取')
+        
+        if not videos:
+            return jsonify({'success': False, 'error': '缺少 videos 参数'}), 400
+        
+        created_count = 0
+        skipped_count = 0
+        task_ids = []
+        
+        # 捕获请求来源
+        origin_url = request.headers.get('Origin') or request.headers.get('Referer') or ''
+        if not origin_url and request.host:
+            scheme = 'https' if request.is_secure else 'http'
+            origin_url = f"{scheme}://{request.host}"
+        
+        for video in videos:
+            bvid = video.get('bvid', '').strip()
+            if not bvid:
+                continue
+            
+            title = video.get('title', '')
+            cover = video.get('cover', '')
+            owner = video.get('owner', '')
+            
+            # 检查是否已有历史记录
+            from models import HistoryItem
+            history = HistoryItem.query.filter_by(user_id=user.id, bvid=bvid).first()
+            if history and history.transcript:
+                skipped_count += 1
+                continue
+            
+            # 创建任务
+            task_id = extension_task_manager.create_task(
+                user_id=user.id,
+                bvid=bvid,
+                title=title,
+                cover=cover,
+                owner=owner,
+                use_asr=False
+            )
+            
+            task = extension_task_manager.get_task(task_id)
+            
+            if task['status'] == extension_task_manager.STATUS_PENDING:
+                # 启动后台处理
+                executor.submit(
+                    _extension_process_task,
+                    task_id,
+                    user.id,
+                    bvid,
+                    False,  # use_asr
+                    origin_url
+                )
+                created_count += 1
+                task_ids.append(task_id)
+            elif task['status'] == extension_task_manager.STATUS_COMPLETED:
+                skipped_count += 1
+        
+        logger.info(f"[extension] 批量创建任务: collection={collection_title}, created={created_count}, skipped={skipped_count}")
+        
+        return jsonify({
+            'success': True,
+            'created': created_count,
+            'skipped': skipped_count,
+            'task_ids': task_ids,
+            'message': f'已创建 {created_count} 个任务，跳过 {skipped_count} 个已有记录'
+        })
+        
+    except Exception as e:
+        logger.error(f"[extension] 批量创建任务失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool, origin_url: str = None):
     """后台处理字幕提取任务"""
     from models import User, HistoryItem
