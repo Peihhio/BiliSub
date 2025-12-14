@@ -3624,13 +3624,21 @@ def extension_create_task():
         task = extension_task_manager.get_task(task_id)
         
         if task['status'] == extension_task_manager.STATUS_PENDING:
+            # 捕获请求来源用于直链检测
+            origin_url = request.headers.get('Origin') or request.headers.get('Referer') or ''
+            if not origin_url and request.host:
+                # 从 Host 头构建 URL
+                scheme = 'https' if request.is_secure else 'http'
+                origin_url = f"{scheme}://{request.host}"
+            
             # 新任务，启动后台处理
             executor.submit(
                 _extension_process_task,
                 task_id,
                 user.id,
                 bvid,
-                use_asr
+                use_asr,
+                origin_url
             )
         
         return jsonify({
@@ -3646,11 +3654,11 @@ def extension_create_task():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool):
+def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool, origin_url: str = None):
     """后台处理字幕提取任务"""
     from models import User, HistoryItem
     
-    logger.info(f"[extension] 开始处理任务: task_id={task_id}, bvid={bvid}, use_asr={use_asr}")
+    logger.info(f"[extension] 开始处理任务: task_id={task_id}, bvid={bvid}, use_asr={use_asr}, origin={origin_url}")
     
     with app.app_context():
         try:
@@ -3728,21 +3736,45 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                         stage_desc="准备上传")
                     
                     # 语音识别 (45-90%)
-                    # 简化直链检测：HTTPS 访问意味着服务器一定是公网可达的
-                    # 因此只要缓存中有 public_url，就使用它（不管缓存是否过期）
+                    # 直链检测优先级：1.缓存 2.传入的origin_url 3.用户配置 4.第三方
                     self_hosted_domain = None
                     
-                    # 优先使用缓存的 public_url（即使缓存过期也可用，因为 HTTPS 环境下一定是公网可达）
+                    # 1. 优先使用缓存的 public_url
                     cached_result = _public_access_cache.get('result')
                     if cached_result and cached_result.get('is_public') and cached_result.get('public_url'):
                         self_hosted_domain = cached_result.get('public_url')
                         logger.info(f"[extension] [{bvid}] 使用本地直链(缓存): {self_hosted_domain}")
-                    # 其次使用用户配置的 self_hosted_domain
-                    elif user.use_self_hosted and user.self_hosted_domain:
+                    # 2. 使用传入的 origin_url（来自插件请求）
+                    elif origin_url and origin_url.startswith('http'):
+                        # 验证 origin 是否为公网 IP
+                        import socket
+                        import ipaddress
+                        from urllib.parse import urlparse
+                        try:
+                            parsed = urlparse(origin_url)
+                            hostname = parsed.hostname
+                            if hostname:
+                                origin_ip = socket.gethostbyname(hostname)
+                                ip_obj = ipaddress.ip_address(origin_ip)
+                                if not (ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved):
+                                    # 公网 IP，可以使用
+                                    self_hosted_domain = origin_url
+                                    logger.info(f"[extension] [{bvid}] 使用本地直链(请求来源): {self_hosted_domain}")
+                                    # 同时更新缓存
+                                    _public_access_cache['result'] = {
+                                        'is_public': True,
+                                        'public_url': origin_url,
+                                        'reason': f'从插件请求推断 ({hostname} -> {origin_ip})'
+                                    }
+                                    _public_access_cache['timestamp'] = time.time()
+                        except Exception as e:
+                            logger.warning(f"[extension] [{bvid}] 解析 origin_url 失败: {e}")
+                    # 3. 使用用户配置的 self_hosted_domain
+                    if not self_hosted_domain and user.use_self_hosted and user.self_hosted_domain:
                         self_hosted_domain = user.self_hosted_domain
                         logger.info(f"[extension] [{bvid}] 使用用户配置的直链: {self_hosted_domain}")
-                    # 最后尝试从请求中推断（如果有 Origin 缓存）
-                    else:
+                    # 4. 最后使用第三方直链
+                    if not self_hosted_domain:
                         logger.info(f"[extension] [{bvid}] 本地直链不可用，使用第三方直链")
 
                     

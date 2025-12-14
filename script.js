@@ -4176,7 +4176,7 @@ async function fetchExtensionTasks() {
 }
 
 /**
- * 渲染插件任务卡片
+ * 渲染插件任务卡片（样式与当前任务完全一致）
  */
 function renderExtensionTasks(tasks) {
     const section = document.getElementById('extensionTasksSection');
@@ -4221,50 +4221,32 @@ function renderExtensionTasks(tasks) {
         countEl.textContent = countText || '无任务';
     }
 
-    // 渲染卡片（使用与当前任务一致的样式结构）
+    // 渲染卡片（使用与当前任务完全一致的结构，不显示百分数）
     grid.innerHTML = visibleTasks.map(task => {
         const isFailed = task.status === 'failed';
         const progressPercent = isFailed ? 100 : (task.progress || 0);
 
         // 确定进度条样式类
         let progressBarClass = '';
+        let statusBadge = '';
         if (isFailed) {
             progressBarClass = 'error';
+            statusBadge = '<span class="video-result-badge error">提取失败</span>';
         } else if (task.status === 'completed') {
             progressBarClass = 'completed';
+            statusBadge = '<span class="video-result-badge success">已完成</span>';
         } else if (task.status !== 'pending') {
             progressBarClass = 'processing';
         }
 
-        // 构建状态徽章
-        let statusBadge = '';
-        if (isFailed) {
-            statusBadge = '<span class="video-result-badge error">提取失败</span>';
-        } else if (task.status === 'completed') {
-            statusBadge = '<span class="video-result-badge success">已完成</span>';
-        }
+        // 获取阶段描述（不含百分数，仅用于显示当前阶段）
+        const stageDesc = task.stage_desc ? task.stage_desc.replace(/\s*\d+%\s*/g, '').trim() : getStageText(task.status);
 
-        // 构建状态文本（修复：只显示一个百分数）
-        let statusText = '';
-        if (isFailed) {
-            statusText = task.error || '处理失败';
-        } else {
-            const desc = task.stage_desc || getStageText(task.status);
-            // 检查描述是否已包含百分比（匹配数字+%）
-            if (/\d+%/.test(desc)) {
-                // 描述已包含百分比，直接使用
-                statusText = desc;
-            } else {
-                // 描述不包含百分比，追加进度
-                statusText = `${desc} ${progressPercent}%`;
-            }
-        }
-
-        // 使用与当前任务一致的卡片结构
+        // 使用与 renderVideoList 完全一致的卡片结构
         return `
-            <div class="video-item history-item-card extension-task-item" data-bvid="${task.bvid}">
+            <div class="video-item history-item-card" data-bvid="${task.bvid}">
                 <div class="video-cover">
-                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Crect fill='%23333' width='160' height='100'/%3E%3Ctext x='50%25' y='50%25' fill='%23666' text-anchor='middle' dy='.3em'%3E🔌%3C/text%3E%3C/svg%3E" 
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Crect fill='%23333' width='160' height='100'/%3E%3Ctext x='50%25' y='50%25' fill='%23666' text-anchor='middle' dy='.3em' font-size='24'%3E🔌%3C/text%3E%3C/svg%3E" 
                          alt="插件任务" loading="lazy">
                 </div>
                 <div class="video-info-wrapper">
@@ -4273,7 +4255,17 @@ function renderExtensionTasks(tasks) {
                         ${statusBadge}
                     </div>
                     <div class="video-meta-area">
-                        <span class="video-author">${statusText}</span>
+                        <span class="video-author">${stageDesc}</span>
+                        <div class="video-actions">
+                            <button class="video-action-btn" title="查看原视频"
+                                    onclick="event.stopPropagation(); window.open('https://www.bilibili.com/video/${task.bvid}', '_blank')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                    <polyline points="15 3 21 3 21 9"/>
+                                    <line x1="10" y1="14" x2="21" y2="3"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div class="video-card-progress ${progressBarClass}">
