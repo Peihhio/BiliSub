@@ -3580,10 +3580,17 @@ def extension_llm_process():
             {"role": "system", "content": prompt}
         ]
         
-        # 添加字幕内容
-        user_content = f"视频字幕内容:\n{content}"
-        if question:
-            user_content += f"\n\n用户问题: {question}"
+        # 根据模式构建消息
+        mode = data.get('mode', 'chat')  # chat 或 summary
+        
+        if mode == 'summary':
+            # 摘要模式：直接使用用户配置的 prompt 处理字幕
+            user_content = f"请处理以下视频字幕内容:\n\n{content}"
+        else:
+            # 对话模式：字幕内容 + 用户问题
+            user_content = f"视频字幕内容:\n{content}"
+            if question:
+                user_content += f"\n\n用户问题: {question}"
         
         messages.append({"role": "user", "content": user_content})
         
