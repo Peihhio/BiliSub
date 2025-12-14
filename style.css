@@ -1104,6 +1104,14 @@ body {
     height: 14px;
 }
 
+.video-action-btn.danger {
+    color: #ef4444;
+}
+
+.video-action-btn.danger:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.2);
+}
+
 /* 处理中动画 */
 .video-item.processing .video-index {
     animation: processingPulse 1.5s ease infinite;

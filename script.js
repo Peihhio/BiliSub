@@ -4179,10 +4179,11 @@ async function fetchExtensionTasks() {
             // 标记为已处理
             newlyCompleted.forEach(task => _completedExtensionTaskIds.add(task.task_id));
 
-            // 如果有新完成的任务，刷新历史列表
+            // 如果有新完成的任务，只刷新历史列表（不触发配置验证避免闪烁）
             if (newlyCompleted.length > 0) {
                 console.log('[Extension Tasks] 检测到新完成任务，刷新历史列表');
-                loadSavedData(); // 刷新配置和历史
+                await loadHistoryData();
+                renderHistoryList();
             }
 
             renderExtensionTasks(data.tasks);
@@ -4282,6 +4283,15 @@ function renderExtensionTasks(tasks) {
                     <div class="video-meta-area">
                         <span class="video-author">${ownerText}</span>
                         <div class="video-actions">
+                            ${!['completed'].includes(task.status) ? `
+                            <button class="video-action-btn danger" title="删除任务"
+                                    onclick="event.stopPropagation(); deleteExtensionTask('${task.task_id}')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"/>
+                                    <line x1="6" y1="6" x2="18" y2="18"/>
+                                </svg>
+                            </button>
+                            ` : ''}
                             <button class="video-action-btn" title="查看原视频"
                                     onclick="event.stopPropagation(); window.open('https://www.bilibili.com/video/${task.bvid}', '_blank')">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -4353,6 +4363,29 @@ async function clearFailedExtensionTasks() {
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
             </svg>清除失败`;
         }
+    }
+}
+
+/**
+ * 删除单个插件任务
+ */
+async function deleteExtensionTask(taskId) {
+    try {
+        const response = await fetch(`/api/extension/tasks/${taskId}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showToast('任务已删除', 'success');
+            fetchExtensionTasks();
+        } else {
+            showToast(result.error || '删除失败', 'error');
+        }
+    } catch (error) {
+        console.error('删除任务出错:', error);
+        showToast('删除失败: ' + error.message, 'error');
     }
 }
 
