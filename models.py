@@ -196,6 +196,9 @@ def init_database(app):
     with app.app_context():
         db.create_all()
         
+        # 数据库迁移：检查并添加缺失的列
+        _migrate_extension_tasks_table()
+        
         # 检查是否存在管理员账户
         admin = User.query.filter_by(username='admin').first()
         if not admin:
@@ -225,4 +228,32 @@ def init_database(app):
             print(f'[INFO] 生成初始邀请码: {invite_code}')
         
         db.session.commit()
+
+
+def _migrate_extension_tasks_table():
+    """检查并添加 extension_tasks 表中缺失的列"""
+    try:
+        # 检查表是否存在
+        result = db.session.execute(db.text("SELECT name FROM sqlite_master WHERE type='table' AND name='extension_tasks'"))
+        if not result.fetchone():
+            return  # 表不存在，create_all 会创建
+        
+        # 获取现有列
+        result = db.session.execute(db.text("PRAGMA table_info(extension_tasks)"))
+        existing_columns = {row[1] for row in result.fetchall()}
+        
+        # 需要添加的列
+        migrations = [
+            ('cover', 'VARCHAR(500)'),
+            ('owner', 'VARCHAR(200)'),
+        ]
+        
+        for column_name, column_type in migrations:
+            if column_name not in existing_columns:
+                db.session.execute(db.text(f"ALTER TABLE extension_tasks ADD COLUMN {column_name} {column_type}"))
+                print(f'[INFO] 数据库迁移: 添加列 extension_tasks.{column_name}')
+        
+        db.session.commit()
+    except Exception as e:
+        print(f'[WARNING] 数据库迁移失败: {e}')
 

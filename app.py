@@ -561,6 +561,32 @@ class ExtensionTaskManager:
                 db.session.commit()
         except Exception as e:
             logger.error(f"[ExtensionTask] 清理旧任务失败: {e}")
+    
+    def clear_user_failed_tasks(self, user_id: int):
+        """清理用户失败任务的内存缓存"""
+        with self.lock:
+            if user_id in self.user_tasks:
+                # 找出所有失败/取消的任务并从缓存中删除
+                bvids_to_remove = []
+                for bvid, task_id in self.user_tasks[user_id].items():
+                    task = self.tasks.get(task_id)
+                    if task and task.get('status') in [self.STATUS_FAILED, self.STATUS_CANCELLED]:
+                        bvids_to_remove.append(bvid)
+                        if task_id in self.tasks:
+                            del self.tasks[task_id]
+                for bvid in bvids_to_remove:
+                    del self.user_tasks[user_id][bvid]
+    
+    def remove_task(self, task_id: str, user_id: int):
+        """从内存缓存中删除任务"""
+        with self.lock:
+            if task_id in self.tasks:
+                task = self.tasks[task_id]
+                bvid = task.get('bvid')
+                del self.tasks[task_id]
+                # 同时从用户任务映射中删除
+                if user_id in self.user_tasks and bvid and bvid in self.user_tasks[user_id]:
+                    del self.user_tasks[user_id][bvid]
 
 extension_task_manager = ExtensionTaskManager()
 
@@ -3956,6 +3982,61 @@ def get_extension_tasks_all():
         'success': True,
         'tasks': tasks
     })
+
+
+@app.route('/api/extension/tasks/clear-failed', methods=['DELETE'])
+@login_required
+def clear_failed_extension_tasks():
+    """
+    清除当前用户所有失败和取消的插件任务
+    
+    响应: {"success": true, "deleted": 数量}
+    """
+    try:
+        from models import ExtensionTask
+        deleted = ExtensionTask.query.filter(
+            ExtensionTask.user_id == current_user.id,
+            ExtensionTask.status.in_(['failed', 'cancelled'])
+        ).delete(synchronize_session=False)
+        db.session.commit()
+        
+        # 同时清理内存缓存
+        extension_task_manager.clear_user_failed_tasks(current_user.id)
+        
+        logger.info(f"[extension] 用户 {current_user.username} 清除了 {deleted} 个失败任务")
+        return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[extension] 清除失败任务出错: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/extension/tasks/<task_id>', methods=['DELETE'])
+@login_required
+def delete_extension_task(task_id):
+    """
+    删除指定的插件任务
+    
+    响应: {"success": true}
+    """
+    try:
+        from models import ExtensionTask
+        task = ExtensionTask.query.filter_by(task_id=task_id, user_id=current_user.id).first()
+        if not task:
+            return jsonify({'success': False, 'error': '任务不存在'}), 404
+        
+        db.session.delete(task)
+        db.session.commit()
+        
+        # 同时从内存缓存删除
+        extension_task_manager.remove_task(task_id, current_user.id)
+        
+        logger.info(f"[extension] 用户 {current_user.username} 删除了任务 {task_id}")
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[extension] 删除任务出错: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/extension/history/<bvid>', methods=['GET'])
 @extension_auth_required

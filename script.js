@@ -4301,6 +4301,44 @@ function getStageText(status) {
 }
 
 /**
+ * 清除所有失败的插件任务
+ */
+async function clearFailedExtensionTasks() {
+    const btn = document.getElementById('extensionClearFailedBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '清除中...';
+    }
+
+    try {
+        const response = await fetch('/api/extension/tasks/clear-failed', {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showToast(`已清除 ${result.deleted} 个失败任务`, 'success');
+            // 立即刷新任务列表
+            fetchExtensionTasks();
+        } else {
+            showToast(result.error || '清除失败', 'error');
+        }
+    } catch (error) {
+        console.error('清除失败任务出错:', error);
+        showToast('清除失败: ' + error.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>清除失败`;
+        }
+    }
+}
+
+/**
  * 开始插件任务轮询
  */
 function startExtensionTasksPolling() {

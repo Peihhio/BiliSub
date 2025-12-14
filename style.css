@@ -3233,6 +3233,36 @@ body {
     border-radius: var(--radius-sm);
 }
 
+.extension-task-header-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.extension-clear-failed-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-sm);
+    color: #ef4444;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.extension-clear-failed-btn:hover {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+.extension-clear-failed-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
 .extension-tasks-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
