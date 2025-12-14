@@ -1039,10 +1039,9 @@ async function processWithLLM(type, identifier) {
                 const numericIndex = parseInt(identifier);
                 videoAiResults[numericIndex] = aiResult;
 
-                // 如果当前选中的就是这个视频，更新显示
-                if (selectedVideoIndex === numericIndex) {
-                    displayVideoWithAiResult(numericIndex);
-                }
+                // 自动选中该视频并刷新显示（用户点击AI按钮的预期行为）
+                selectedVideoIndex = numericIndex;
+                displayVideoWithAiResult(numericIndex);
 
                 // 同步更新历史记录
                 if (itemData && itemData.url) {
@@ -1069,8 +1068,10 @@ async function processWithLLM(type, identifier) {
                         console.log('同步AI结果到历史记录:', historyItem.title);
                         historyItem.aiAbstract = aiResult;
                         saveHistoryData();
-                        // 如果当前查看的就是这个历史记录，尝试刷新（如果在历史视图中）
-                        // 但注意不要与当前视图冲突。
+                        // 如果当前查看的就是这个历史记录，刷新显示
+                        if (selectedHistoryId === historyItem.id) {
+                            displayHistoryWithAiResult(historyItem.id);
+                        }
                     } else {
                         console.warn('未找到对应的历史记录用于同步:', itemData.title, itemData.url);
                     }
@@ -1158,8 +1159,8 @@ function displayHistoryWithAiResult(id) {
     const item = historyData.find(h => h.id === id);
     if (!item || !historyTranscriptContainer) return;
 
-    // AI 处理结果（基于提示词）
-    const aiSummary = item.aiSummary || item.aiResult || '';
+    // AI 处理结果（优先使用 aiAbstract，兼容 aiSummary/aiResult）
+    const aiSummary = item.aiAbstract || item.aiSummary || item.aiResult || '';
 
     let content = '';
 
@@ -3235,15 +3236,36 @@ function handleHistorySelectAll() {
 }
 
 /**
- * 选择历史项查看字幕
+ * 选择历史项查看字幕（每次点击都从后端获取最新数据）
  */
-function selectHistoryItem(id) {
+async function selectHistoryItem(id) {
     selectedHistoryId = id;
     const item = historyData.find(h => h.id === id);
 
     if (item && historyCurrentVideoTitle) {
         historyCurrentVideoTitle.textContent = item.title;
-        // 使用新的显示函数（支持AI结果）
+
+        // 从后端获取最新AI总结（支持插件端更新后刷新）
+        try {
+            const response = await fetch(`/api/history/${id}/check-update`);
+            const data = await response.json();
+
+            if (data.success) {
+                // 更新本地缓存
+                if (data.ai_summary) {
+                    item.aiAbstract = data.ai_summary;
+                    item.aiSummary = data.ai_summary;
+                }
+                if (data.updated_at) {
+                    item.updatedAt = data.updated_at;
+                }
+            }
+        } catch (e) {
+            // 获取失败时使用本地缓存，不影响显示
+            console.warn('[History] 获取最新数据失败，使用本地缓存');
+        }
+
+        // 显示（使用最新数据或本地缓存）
         displayHistoryWithAiResult(id);
     }
 

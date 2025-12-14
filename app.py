@@ -4264,6 +4264,27 @@ def update_history_ai_summary(id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/history/<int:id>/check-update', methods=['GET'])
+@login_required
+def check_history_update(id):
+    """
+    检查历史记录是否有更新（轻量级API，用于轮询）
+    返回更新时间和AI总结（如果有变化则前端刷新）
+    """
+    from models import HistoryItem
+    
+    history = HistoryItem.query.filter_by(id=id, user_id=current_user.id).first()
+    if not history:
+        return jsonify({'success': False, 'error': '历史记录不存在'}), 404
+    
+    return jsonify({
+        'success': True,
+        'updated_at': history.updated_at.isoformat() if history.updated_at else None,
+        'ai_summary': history.ai_summary or '',
+        'ai_chat': history.ai_chat or ''
+    })
+
+
 if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info("B站字幕提取服务启动")
