@@ -3739,10 +3739,13 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                     logger.info(f"[extension] [{bvid}] 开始语音识别，self_hosted={use_self_hosted}")
                     
                     # 创建带进度回调的日志收集器
-                    def transcribe_progress_callback(stage, progress_pct):
-                        # 映射到 48-88% 区间
-                        mapped_progress = 48 + int(progress_pct * 0.4)
-                        update_progress(mapped_progress, f"语音识别 {int(progress_pct)}%")
+                    # 注意：LogCollector 的 progress_callback 接收一个字典参数
+                    def transcribe_progress_callback(data):
+                        if data.get('type') == 'progress':
+                            # 映射到 48-88% 区间
+                            progress_pct = data.get('progress', 0)
+                            mapped_progress = 48 + int(progress_pct * 0.4)
+                            update_progress(mapped_progress, f"语音识别 {int(progress_pct)}%")
                     
                     log_collector.progress_callback = transcribe_progress_callback
                     
