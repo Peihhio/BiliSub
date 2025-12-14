@@ -3728,17 +3728,28 @@ def _extension_process_task(task_id: str, user_id: int, bvid: str, use_asr: bool
                         stage_desc="准备上传")
                     
                     # 语音识别 (45-90%)
-                    # 使用公网检测，与网站端一致（而非 user.use_self_hosted）
-                    # 检查缓存的公网检测结果
-                    use_local_url = False
+                    # 主动检测公网可访问性，与网站端一致
                     self_hosted_domain = None
                     
-                    if _public_access_cache.get('result') and _public_access_cache['result'].get('is_public'):
-                        use_local_url = True
+                    # 检查缓存或重新检测
+                    import time as time_module
+                    current_time = time_module.time()
+                    cache_valid = (
+                        _public_access_cache.get('result') is not None and 
+                        current_time - _public_access_cache.get('timestamp', 0) < _public_access_cache.get('cache_duration', 600)
+                    )
+                    
+                    if cache_valid and _public_access_cache['result'].get('is_public'):
                         self_hosted_domain = _public_access_cache['result'].get('public_url')
-                        logger.info(f"[extension] [{bvid}] 使用本地直链: {self_hosted_domain}")
+                        logger.info(f"[extension] [{bvid}] 使用本地直链(缓存): {self_hosted_domain}")
                     else:
-                        logger.info(f"[extension] [{bvid}] 本地直链不可用，使用第三方直链")
+                        # 尝试使用用户配置的 self_hosted_domain
+                        if user.use_self_hosted and user.self_hosted_domain:
+                            self_hosted_domain = user.self_hosted_domain
+                            logger.info(f"[extension] [{bvid}] 使用用户配置的直链: {self_hosted_domain}")
+                        else:
+                            logger.info(f"[extension] [{bvid}] 本地直链不可用，使用第三方直链")
+
                     
                     extension_task_manager.update_task(task_id,
                         status=ExtensionTaskManager.STATUS_TRANSCRIBING,
