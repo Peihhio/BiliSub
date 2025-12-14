@@ -4096,7 +4096,9 @@ def extension_check_history(bvid):
             'success': True,
             'exists': True,
             'transcript': history.transcript,
-            'ai_result': history.ai_result,
+            'ai_result': history.ai_result or '',
+            'ai_summary': history.ai_summary or history.ai_result or '',
+            'ai_chat': history.ai_chat or '',
             'title': history.title,
             'updated_at': history.updated_at.isoformat() if history.updated_at else None
         })

@@ -1152,7 +1152,7 @@ function displayVideoWithAiResult(index) {
 }
 
 /**
- * 显示历史记录字幕和AI结果（支持分区：处理结果 + 对话历史）
+ * 显示历史记录字幕和AI结果（简洁版：只显示 AI 总结，对话历史仅在后台存储）
  */
 function displayHistoryWithAiResult(id) {
     const item = historyData.find(h => h.id === id);
@@ -1160,60 +1160,26 @@ function displayHistoryWithAiResult(id) {
 
     // AI 处理结果（基于提示词）
     const aiSummary = item.aiSummary || item.aiResult || '';
-    // AI 对话历史
-    const aiChat = item.aiChat || '';
 
     let content = '';
 
-    // === AI 处理结果区域（上半部分）===
-    content += `<div class="ai-result-section">
-        <div class="ai-result-header">
-            <div class="ai-result-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-                <span>AI 处理结果</span>
+    // === AI 处理结果区域（只在有内容时显示）===
+    if (aiSummary) {
+        content += `<div class="ai-result-section">
+            <div class="ai-result-header">
+                <div class="ai-result-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <span>AI 处理结果</span>
+                </div>
             </div>
-            <button type="button" class="ai-refresh-btn" onclick="regenerateAiSummary('${id}')" title="重新生成">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="23 4 23 10 17 10"/>
-                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                </svg>
-            </button>
+            <div class="ai-result-content">${escapeHtml(aiSummary)}</div>
         </div>
-        <div class="ai-result-content" id="aiSummaryContent">${aiSummary ? escapeHtml(aiSummary) : '<span class="ai-empty">点击刷新按钮生成 AI 摘要</span>'}</div>
-    </div>`;
-
-    // === 分隔线 ===
-    content += `<div class="ai-section-divider"><span>对话历史</span></div>`;
-
-    // === AI 对话历史区域（下半部分）===
-    content += `<div class="ai-chat-section">
-        <div class="ai-chat-history" id="aiChatHistory">`;
-
-    // 解析并显示对话历史
-    if (aiChat) {
-        const dialogMatches = aiChat.matchAll(/【问】([\s\S]*?)【答】([\s\S]*?)(?=【问】|$)/g);
-        for (const match of dialogMatches) {
-            const question = match[1].trim();
-            const answer = match[2].trim();
-            if (question && answer) {
-                content += `<div class="ai-chat-msg user">${escapeHtml(question)}</div>`;
-                content += `<div class="ai-chat-msg ai">${escapeHtml(answer)}</div>`;
-            }
-        }
+        <div class="transcript-divider"></div>`;
     }
-
-    content += `</div>
-        <div class="ai-chat-empty" id="aiChatEmpty" style="${aiChat ? 'display:none' : ''}">
-            暂无对话历史，可通过插件与视频字幕对话
-        </div>
-    </div>`;
-
-    // === 分隔线 ===
-    content += `<div class="transcript-divider"></div>`;
 
     // === 字幕编辑区域 ===
     content += `<div class="transcript-edit-wrapper">
