@@ -4242,12 +4242,19 @@ function renderExtensionTasks(tasks) {
         // 获取阶段描述（不含百分数，仅用于显示当前阶段）
         const stageDesc = task.stage_desc ? task.stage_desc.replace(/\s*\d+%\s*/g, '').trim() : getStageText(task.status);
 
+        // 封面图：优先使用任务中的封面，否则使用占位符
+        const coverUrl = task.cover || `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Crect fill='%23333' width='160' height='100'/%3E%3Ctext x='50%25' y='50%25' fill='%23666' text-anchor='middle' dy='.3em' font-size='24'%3E🔌%3C/text%3E%3C/svg%3E`;
+
+        // UP主信息
+        const ownerText = task.owner ? `UP主: ${escapeHtml(task.owner)}` : stageDesc;
+
         // 使用与 renderVideoList 完全一致的卡片结构
         return `
             <div class="video-item history-item-card" data-bvid="${task.bvid}">
                 <div class="video-cover">
-                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Crect fill='%23333' width='160' height='100'/%3E%3Ctext x='50%25' y='50%25' fill='%23666' text-anchor='middle' dy='.3em' font-size='24'%3E🔌%3C/text%3E%3C/svg%3E" 
-                         alt="插件任务" loading="lazy">
+                    <img src="${coverUrl}" 
+                         alt="${escapeHtml(task.title || task.bvid)}" loading="lazy" referrerpolicy="no-referrer"
+                         onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 160 100%22%3E%3Crect fill=%22%23333%22 width=%22160%22 height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 fill=%22%23666%22 text-anchor=%22middle%22 dy=%22.3em%22%3E🔌%3C/text%3E%3C/svg%3E'">
                 </div>
                 <div class="video-info-wrapper">
                     <div class="video-title-area">
@@ -4255,7 +4262,7 @@ function renderExtensionTasks(tasks) {
                         ${statusBadge}
                     </div>
                     <div class="video-meta-area">
-                        <span class="video-author">${stageDesc}</span>
+                        <span class="video-author">${ownerText}</span>
                         <div class="video-actions">
                             <button class="video-action-btn" title="查看原视频"
                                     onclick="event.stopPropagation(); window.open('https://www.bilibili.com/video/${task.bvid}', '_blank')">

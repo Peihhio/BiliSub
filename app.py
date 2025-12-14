@@ -315,12 +315,19 @@ class ExtensionTaskManager:
                     db_task.stage_desc = task.get('stage_desc', '')
                     db_task.error = task.get('error')
                     db_task.transcript = task.get('transcript')
+                    # 更新 cover 和 owner（如果有）
+                    if task.get('cover'):
+                        db_task.cover = task.get('cover')
+                    if task.get('owner'):
+                        db_task.owner = task.get('owner')
                 else:
                     db_task = ExtensionTask(
                         task_id=task_id,
                         user_id=task['user_id'],
                         bvid=task['bvid'],
                         title=task.get('title', task['bvid']),
+                        cover=task.get('cover'),
+                        owner=task.get('owner'),
                         status=task.get('status', 'pending'),
                         progress=task.get('progress', 0),
                         stage_desc=task.get('stage_desc', '等待处理')
@@ -365,7 +372,7 @@ class ExtensionTaskManager:
             logger.error(f"[ExtensionTask] 数据库加载失败: {e}")
         return {}
     
-    def create_task(self, user_id: int, bvid: str, title: str = None, use_asr: bool = False) -> str:
+    def create_task(self, user_id: int, bvid: str, title: str = None, cover: str = None, owner: str = None, use_asr: bool = False) -> str:
         """创建新任务，返回任务ID"""
         task_id = str(uuid.uuid4())
         now = datetime.utcnow()
@@ -394,6 +401,8 @@ class ExtensionTaskManager:
                 "user_id": user_id,
                 "bvid": bvid,
                 "title": title or bvid,
+                "cover": cover,
+                "owner": owner,
                 "use_asr": use_asr,
                 "status": self.STATUS_PENDING,
                 "progress": 0,
@@ -3592,6 +3601,8 @@ def extension_create_task():
         data = request.get_json() or {}
         bvid = data.get('bvid', '').strip()
         title = data.get('title', '')
+        cover = data.get('cover', '')  # 封面图 URL
+        owner = data.get('owner', '')  # UP主名称
         use_asr = data.get('use_asr', False)
         
         if not bvid:
@@ -3617,6 +3628,8 @@ def extension_create_task():
             user_id=user.id,
             bvid=bvid,
             title=title,
+            cover=cover,
+            owner=owner,
             use_asr=use_asr
         )
         

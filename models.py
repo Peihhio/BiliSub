@@ -125,6 +125,8 @@ class ExtensionTask(db.Model):
                         nullable=False, index=True)
     bvid = db.Column(db.String(50), nullable=False, index=True)
     title = db.Column(db.String(500), nullable=True)
+    cover = db.Column(db.String(500), nullable=True)  # 封面图 URL
+    owner = db.Column(db.String(200), nullable=True)  # UP主名称
     
     # 任务状态
     status = db.Column(db.String(20), nullable=False, default='pending')
@@ -148,6 +150,8 @@ class ExtensionTask(db.Model):
             'task_id': self.task_id,
             'bvid': self.bvid,
             'title': self.title,
+            'cover': self.cover,
+            'owner': self.owner,
             'status': self.status,
             'progress': self.progress,
             'stage_desc': self.stage_desc,
