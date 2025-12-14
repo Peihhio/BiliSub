@@ -4159,6 +4159,9 @@ let extensionTasksPollingTimer = null;
 /**
  * 获取并显示插件任务
  */
+// 用于追踪已完成的任务，避免重复刷新历史
+let _completedExtensionTaskIds = new Set();
+
 async function fetchExtensionTasks() {
     if (isGuestUser) return; // Guest 用户不支持插件
 
@@ -4168,12 +4171,27 @@ async function fetchExtensionTasks() {
         const data = await response.json();
 
         if (data.success) {
+            // 检测新完成的任务
+            const newlyCompleted = data.tasks.filter(task =>
+                task.status === 'completed' && !_completedExtensionTaskIds.has(task.task_id)
+            );
+
+            // 标记为已处理
+            newlyCompleted.forEach(task => _completedExtensionTaskIds.add(task.task_id));
+
+            // 如果有新完成的任务，刷新历史列表
+            if (newlyCompleted.length > 0) {
+                console.log('[Extension Tasks] 检测到新完成任务，刷新历史列表');
+                loadSavedData(); // 刷新配置和历史
+            }
+
             renderExtensionTasks(data.tasks);
         }
     } catch (error) {
         console.error('[Extension Tasks] 获取失败:', error);
     }
 }
+
 
 /**
  * 渲染插件任务卡片（样式与当前任务完全一致）

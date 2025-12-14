@@ -587,6 +587,28 @@ class ExtensionTaskManager:
                 # 同时从用户任务映射中删除
                 if user_id in self.user_tasks and bvid and bvid in self.user_tasks[user_id]:
                     del self.user_tasks[user_id][bvid]
+    
+    def clear_user_stuck_tasks(self, user_id: int, threshold):
+        """清理用户卡住任务的内存缓存（进行中但超时的任务）"""
+        with self.lock:
+            if user_id in self.user_tasks:
+                bvids_to_remove = []
+                for bvid, task_id in self.user_tasks[user_id].items():
+                    task = self.tasks.get(task_id)
+                    if task and task.get('status') not in [self.STATUS_COMPLETED, self.STATUS_FAILED, self.STATUS_CANCELLED]:
+                        # 检查是否超时
+                        updated_at_str = task.get('updated_at', '')
+                        if updated_at_str:
+                            try:
+                                updated_at = datetime.fromisoformat(updated_at_str.replace('Z', '+00:00'))
+                                if updated_at.replace(tzinfo=None) < threshold:
+                                    bvids_to_remove.append(bvid)
+                                    if task_id in self.tasks:
+                                        del self.tasks[task_id]
+                            except:
+                                pass
+                for bvid in bvids_to_remove:
+                    del self.user_tasks[user_id][bvid]
 
 extension_task_manager = ExtensionTaskManager()
 
@@ -3988,23 +4010,40 @@ def get_extension_tasks_all():
 @login_required
 def clear_failed_extension_tasks():
     """
-    清除当前用户所有失败和取消的插件任务
+    清除当前用户所有失败、取消和卡住（超时）的插件任务
     
     响应: {"success": true, "deleted": 数量}
     """
     try:
         from models import ExtensionTask
-        deleted = ExtensionTask.query.filter(
+        from datetime import timedelta
+        
+        # 超过10分钟未更新的进行中任务视为卡住
+        stuck_threshold = datetime.utcnow() - timedelta(minutes=10)
+        
+        # 删除失败、取消的任务
+        deleted_failed = ExtensionTask.query.filter(
             ExtensionTask.user_id == current_user.id,
             ExtensionTask.status.in_(['failed', 'cancelled'])
         ).delete(synchronize_session=False)
+        
+        # 删除卡住的任务（进行中但超过10分钟未更新）
+        deleted_stuck = ExtensionTask.query.filter(
+            ExtensionTask.user_id == current_user.id,
+            ExtensionTask.status.notin_(['completed', 'failed', 'cancelled']),
+            ExtensionTask.updated_at < stuck_threshold
+        ).delete(synchronize_session=False)
+        
         db.session.commit()
+        
+        total_deleted = deleted_failed + deleted_stuck
         
         # 同时清理内存缓存
         extension_task_manager.clear_user_failed_tasks(current_user.id)
+        extension_task_manager.clear_user_stuck_tasks(current_user.id, stuck_threshold)
         
-        logger.info(f"[extension] 用户 {current_user.username} 清除了 {deleted} 个失败任务")
-        return jsonify({'success': True, 'deleted': deleted})
+        logger.info(f"[extension] 用户 {current_user.username} 清除了 {deleted_failed} 个失败任务, {deleted_stuck} 个卡住任务")
+        return jsonify({'success': True, 'deleted': total_deleted})
     except Exception as e:
         db.session.rollback()
         logger.error(f"[extension] 清除失败任务出错: {e}")

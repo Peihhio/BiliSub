@@ -3264,45 +3264,15 @@ body {
 }
 
 .extension-tasks-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-md);
-    max-height: 500px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    max-height: 400px;
     overflow-y: auto;
 }
 
-/* 响应式：小屏幕时减少列数 */
-@media (max-width: 1200px) {
-    .extension-tasks-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-}
+/* 插件任务卡片完全继承当前任务/历史任务的样式，不做任何覆盖 */
 
-@media (max-width: 768px) {
-    .extension-tasks-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-/* 插件任务卡片使用与当前任务一致的样式 */
-.extension-tasks-grid .video-item.history-item-card {
-    position: relative;
-    overflow: hidden;
-    flex-direction: column;
-}
-
-.extension-tasks-grid .video-item.history-item-card .video-cover {
-    width: 100%;
-    height: 100px;
-    flex-shrink: 0;
-}
-
-.extension-tasks-grid .video-item.history-item-card .video-cover img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: var(--radius-sm);
-}
 
 .extension-task-card {
     background: var(--bg-secondary);
