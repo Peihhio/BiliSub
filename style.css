@@ -3372,3 +3372,128 @@ body {
 .extension-task-percent.failed {
     color: var(--error);
 }
+
+/* ===== AI 分区样式 ===== */
+.ai-result-section {
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
+.ai-result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-sm);
+}
+
+.ai-result-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.ai-result-title svg {
+    width: 18px;
+    height: 18px;
+}
+
+.ai-refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: var(--transition-fast);
+}
+
+.ai-refresh-btn:hover {
+    background: var(--bg-hover);
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.ai-refresh-btn svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+.ai-result-content {
+    color: var(--text-primary);
+    line-height: 1.7;
+    white-space: pre-wrap;
+}
+
+.ai-empty,
+.ai-loading {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.ai-error {
+    color: var(--error);
+}
+
+/* AI 分隔线 */
+.ai-section-divider {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin: var(--space-md) 0;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.ai-section-divider::before,
+.ai-section-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
+/* AI 对话区域 */
+.ai-chat-section {
+    margin-bottom: var(--space-sm);
+}
+
+.ai-chat-history {
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.ai-chat-msg {
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    max-width: 85%;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.ai-chat-msg.user {
+    align-self: flex-end;
+    background: var(--accent-primary);
+    color: white;
+}
+
+.ai-chat-msg.ai {
+    align-self: flex-start;
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.ai-chat-empty {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    padding: var(--space-md);
+}

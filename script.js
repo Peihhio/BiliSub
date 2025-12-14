@@ -1152,18 +1152,23 @@ function displayVideoWithAiResult(index) {
 }
 
 /**
- * 显示历史记录字幕和AI结果（支持编辑和自动保存）
+ * 显示历史记录字幕和AI结果（支持分区：处理结果 + 对话历史）
  */
 function displayHistoryWithAiResult(id) {
     const item = historyData.find(h => h.id === id);
     if (!item || !historyTranscriptContainer) return;
 
-    const aiResult = item.aiAbstract;
+    // AI 处理结果（基于提示词）
+    const aiSummary = item.aiSummary || item.aiResult || '';
+    // AI 对话历史
+    const aiChat = item.aiChat || '';
+
     let content = '';
 
-    if (aiResult) {
-        content += `<div class="ai-result-section">
-            <div class="ai-result-header">
+    // === AI 处理结果区域（上半部分）===
+    content += `<div class="ai-result-section">
+        <div class="ai-result-header">
+            <div class="ai-result-title">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/>
                     <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
@@ -1171,12 +1176,46 @@ function displayHistoryWithAiResult(id) {
                 </svg>
                 <span>AI 处理结果</span>
             </div>
-            <div class="ai-result-content">${escapeHtml(aiResult)}</div>
+            <button type="button" class="ai-refresh-btn" onclick="regenerateAiSummary('${id}')" title="重新生成">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"/>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+            </button>
         </div>
-        <div class="transcript-divider"></div>`;
+        <div class="ai-result-content" id="aiSummaryContent">${aiSummary ? escapeHtml(aiSummary) : '<span class="ai-empty">点击刷新按钮生成 AI 摘要</span>'}</div>
+    </div>`;
+
+    // === 分隔线 ===
+    content += `<div class="ai-section-divider"><span>对话历史</span></div>`;
+
+    // === AI 对话历史区域（下半部分）===
+    content += `<div class="ai-chat-section">
+        <div class="ai-chat-history" id="aiChatHistory">`;
+
+    // 解析并显示对话历史
+    if (aiChat) {
+        const dialogMatches = aiChat.matchAll(/【问】([\s\S]*?)【答】([\s\S]*?)(?=【问】|$)/g);
+        for (const match of dialogMatches) {
+            const question = match[1].trim();
+            const answer = match[2].trim();
+            if (question && answer) {
+                content += `<div class="ai-chat-msg user">${escapeHtml(question)}</div>`;
+                content += `<div class="ai-chat-msg ai">${escapeHtml(answer)}</div>`;
+            }
+        }
     }
 
-    // 使用textarea实现可编辑字幕
+    content += `</div>
+        <div class="ai-chat-empty" id="aiChatEmpty" style="${aiChat ? 'display:none' : ''}">
+            暂无对话历史，可通过插件与视频字幕对话
+        </div>
+    </div>`;
+
+    // === 分隔线 ===
+    content += `<div class="transcript-divider"></div>`;
+
+    // === 字幕编辑区域 ===
     content += `<div class="transcript-edit-wrapper">
         <span class="transcript-save-indicator" id="saveIndicator">已保存</span>
         <textarea class="transcript-editor" id="transcriptEditor"
@@ -1213,6 +1252,65 @@ function displayHistoryWithAiResult(id) {
                 }
             }, 500);
         });
+    }
+}
+
+/**
+ * 重新生成 AI 处理结果（基于提示词）
+ */
+async function regenerateAiSummary(historyId) {
+    const item = historyData.find(h => h.id === historyId);
+    if (!item || !item.transcript) {
+        showToast('没有字幕内容，无法生成摘要', 'error');
+        return;
+    }
+
+    const contentEl = document.getElementById('aiSummaryContent');
+    if (contentEl) {
+        contentEl.innerHTML = '<span class="ai-loading">AI 处理中...</span>';
+    }
+
+    try {
+        // 调用后端 AI 处理
+        const response = await fetch('/api/llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: item.transcript,
+                use_user_config: true
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success && result.response) {
+            // 保存到服务器
+            await fetch(`/api/history/${historyId}/ai-summary`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ai_summary: result.response })
+            });
+
+            // 更新本地数据和UI
+            const itemIndex = historyData.findIndex(h => h.id === historyId);
+            if (itemIndex !== -1) {
+                historyData[itemIndex].aiSummary = result.response;
+            }
+
+            if (contentEl) {
+                contentEl.innerHTML = escapeHtml(result.response);
+            }
+
+            showToast('AI 处理完成', 'success');
+        } else {
+            throw new Error(result.error || 'AI 处理失败');
+        }
+    } catch (e) {
+        console.error('AI 处理失败:', e);
+        if (contentEl) {
+            contentEl.innerHTML = `<span class="ai-error">处理失败: ${e.message}</span>`;
+        }
+        showToast('AI 处理失败: ' + e.message, 'error');
     }
 }
 
@@ -2737,6 +2835,8 @@ async function loadHistoryData() {
                 tags: item.tags || [],
                 transcript: item.transcript || '',
                 aiResult: item.ai_result || '',
+                aiSummary: item.ai_summary || '',  // AI 处理结果（提示词）
+                aiChat: item.ai_chat || '',  // AI 对话历史
                 date: item.created_at,
                 dateFormatted: item.created_at ? formatDate(new Date(item.created_at)) : '',
                 dateKey: item.created_at ? formatDateKey(new Date(item.created_at)) : ''
