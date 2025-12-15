@@ -4650,12 +4650,20 @@ def cloud_storage_test():
             json.dump(sa_data, f)
             sa_file = f.name
         
+        # 获取 folder_name (作为 root_folder_id)
+        folder_name = request_data.get('folder_name') or current_user.cloud_folder_name or ""
+        
         with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
-            f.write(f"""[gdrive]
+            conf_content = f"""[gdrive]
 type = drive
 scope = drive
 service_account_file = {sa_file}
-""")
+"""
+            # 如果提供了 folder_name，将其视为 root_folder_id
+            if folder_name and len(folder_name) > 20: # 简单的 ID 长度检查
+                conf_content += f"root_folder_id = {folder_name}\n"
+                
+            f.write(conf_content)
             rclone_conf = f.name
         
         # 测试连接
@@ -4671,7 +4679,7 @@ service_account_file = {sa_file}
         if result.returncode == 0:
             return jsonify({
                 'success': True,
-                'message': '连接成功！已检测到 Google Drive'
+                'message': f'连接成功！已访问共享文件夹 (ID: {folder_name})' if folder_name else '连接成功！(根目录)'
             })
         else:
             return jsonify({
@@ -4689,7 +4697,7 @@ service_account_file = {sa_file}
 @login_required
 def cloud_storage_sync():
     """
-    执行云存储同步（仅上传新增文件）
+    执行云存储同步
     """
     from models import HistoryItem
     import subprocess
@@ -4698,15 +4706,50 @@ def cloud_storage_sync():
     
     if not current_user.cloud_service_account:
         return jsonify({'success': False, 'error': '请先配置 Service Account'}), 400
-    
-    folder_name = current_user.cloud_folder_name or 'BiliSub备份'
-    
-    # 获取所有历史记录
-    history_items = HistoryItem.query.filter_by(user_id=current_user.id).all()
-    if not history_items:
-        return jsonify({'success': True, 'message': '暂无历史记录需要同步', 'synced': 0})
-    
+        
     try:
+        # 创建临时 rclone 配置
+        sa_data = json.loads(current_user.cloud_service_account)
+        folder_name = current_user.cloud_folder_name
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(sa_data, f)
+            sa_file = f.name
+            
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
+            conf_content = f"""[gdrive]
+type = drive
+scope = drive
+service_account_file = {sa_file}
+"""
+            # 使用 folder_name 作为 root_folder_id
+            if folder_name:
+                conf_content += f"root_folder_id = {folder_name}\n"
+                
+            f.write(conf_content)
+            rclone_conf = f.name
+            
+        # 执行同步
+        # 注意：源目录末尾的 / 很重要
+        source_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'history')
+        if not os.path.exists(source_dir):
+            os.makedirs(source_dir)
+            
+        # 不再需要在 gdrive: 后面加路径，因为已经指定了 root_folder_id
+        cmd = ['rclone', '--config', rclone_conf, 'copy', source_dir, 'gdrive:', '--ignore-existing', '--transfers', '4']
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        # 获取所有历史记录
+        history_items = HistoryItem.query.filter_by(user_id=current_user.id).all()
+        if not history_items:
+            return jsonify({'success': True, 'message': '暂无历史记录需要同步', 'synced': 0})
+        
         # 创建临时目录存放 MD 文件
         import shutil
         sync_dir = tempfile.mkdtemp(prefix='bilisub_sync_')
