@@ -4839,6 +4839,16 @@ url = {current_user.webdav_url}
             sa_data = json.loads(current_user.cloud_service_account)
             folder_name = current_user.cloud_folder_name
             
+            # 调试日志
+            logger.info(f"[云存储] GDrive 同步: folder_name = '{folder_name}'")
+            
+            # 验证 folder_name 必须存在（Service Account 需要指定共享文件夹）
+            if not folder_name:
+                return jsonify({
+                    'success': False, 
+                    'error': '请在管理后台设置"目标文件夹 ID"（共享给 Service Account 的文件夹 ID）'
+                }), 400
+            
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump(sa_data, f)
                 sa_file = f.name
