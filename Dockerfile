@@ -10,6 +10,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    unzip \
     && curl https://rclone.org/install.sh | bash \
     && rm -rf /var/lib/apt/lists/*
 
