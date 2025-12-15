@@ -526,34 +526,71 @@
             <div class="extension-box">
                 <div class="extension-info">
                     <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                        将历史字幕自动同步到 Google Drive。使用 Service Account 方式授权。
+                        将历史字幕自动同步到云端存储。
                     </p>
-                    <div class="form-group" style="margin-bottom: 1rem;">
-                        <label style="display: block; margin-bottom: 0.5rem;">Service Account JSON</label>
-                        <textarea id="adminCloudJson" rows="5" class="invite-code-input"
-                            style="width: 100%; max-width: 600px; font-size: 0.85rem; font-family: monospace;"
-                            placeholder='粘贴 Service Account JSON 内容...'></textarea>
+
+                    <!-- 存储类型选择 -->
+                    <div class="form-group" style="margin-bottom: 1.5rem;">
+                        <label style="display: block; margin-bottom: 0.5rem;">存储类型</label>
+                        <div style="display: flex; gap: 1rem;">
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="radio" name="storageType" value="gdrive" checked
+                                    onchange="toggleStorageType('gdrive')">
+                                <span style="margin-left: 0.5rem;">Google Drive</span>
+                            </label>
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="radio" name="storageType" value="webdav"
+                                    onchange="toggleStorageType('webdav')">
+                                <span style="margin-left: 0.5rem;">WebDAV</span>
+                            </label>
+                        </div>
                     </div>
-                    <div class="form-group" style="margin-bottom: 1rem;">
-                        <label style="display: block; margin-bottom: 0.5rem;">目标文件夹名称</label>
-                        <input type="text" id="adminCloudFolder" class="invite-code-input" style="width: 250px;"
-                            placeholder="BiliSub备份">
+
+                    <!-- Google Drive 配置 -->
+                    <div id="gdriveConfig">
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label style="display: block; margin-bottom: 0.5rem;">Service Account JSON</label>
+                            <textarea id="adminCloudJson" rows="5" class="invite-code-input"
+                                style="width: 100%; max-width: 600px; font-size: 0.85rem; font-family: monospace;"
+                                placeholder='粘贴 Service Account JSON 内容...'></textarea>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label style="display: block; margin-bottom: 0.5rem;">目标文件夹 ID</label>
+                            <input type="text" id="adminCloudFolder" class="invite-code-input" style="width: 350px;"
+                                placeholder="共享文件夹的 ID (从 URL 复制)">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem;">
+                                需要在 Google Drive 创建文件夹并共享给 Service Account 邮箱
+                            </div>
+                        </div>
                     </div>
+
+                    <!-- WebDAV 配置 -->
+                    <div id="webdavConfig" style="display: none;">
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label style="display: block; margin-bottom: 0.5rem;">WebDAV 地址</label>
+                            <input type="text" id="webdavUrl" class="invite-code-input"
+                                style="width: 100%; max-width: 500px;" placeholder="https://dav.example.com/path/">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem;">
+                                示例: 坚果云 https://dav.jianguoyun.com/dav/ | 群晖 https://your-nas:5006/webdav/
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label style="display: block; margin-bottom: 0.5rem;">用户名</label>
+                            <input type="text" id="webdavUsername" class="invite-code-input" style="width: 250px;"
+                                placeholder="WebDAV 用户名">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label style="display: block; margin-bottom: 0.5rem;">密码</label>
+                            <input type="password" id="webdavPassword" class="invite-code-input" style="width: 250px;"
+                                placeholder="WebDAV 密码或应用密码">
+                        </div>
+                    </div>
+
                     <div id="adminCloudStatus" style="margin-bottom: 1rem;"></div>
                 </div>
                 <div class="extension-actions">
                     <button class="btn btn-secondary" onclick="testAdminCloudConnection()">测试连接</button>
                     <button class="btn btn-primary" onclick="saveAdminCloudConfig()">保存配置</button>
-                </div>
-                <div class="extension-help" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
-                    <p>📌 使用说明：</p>
-                    <ol style="margin-left: 1.5rem; margin-top: 0.5rem;">
-                        <li>在 <a href="https://console.cloud.google.com" target="_blank"
-                                style="color: var(--accent-primary);">Google Cloud Console</a> 创建项目并启用 Drive API</li>
-                        <li>创建 Service Account，下载 JSON 密钥</li>
-                        <li>在 Google Drive 中共享目标文件夹给 Service Account 邮箱</li>
-                        <li>将 JSON 内容粘贴到上方，保存后在主页点击 ☁️ 即可同步</li>
-                    </ol>
                 </div>
             </div>
         </div>
@@ -949,14 +986,39 @@
         }
 
         // ===== 云存储配置 =====
+        function toggleStorageType(type) {
+            document.getElementById('gdriveConfig').style.display = type === 'gdrive' ? 'block' : 'none';
+            document.getElementById('webdavConfig').style.display = type === 'webdav' ? 'block' : 'none';
+            document.getElementById('adminCloudStatus').innerHTML = '';
+        }
+
+        function getSelectedStorageType() {
+            return document.querySelector('input[name="storageType"]:checked')?.value || 'gdrive';
+        }
+
         async function loadCloudConfig() {
             try {
                 const resp = await fetch('/api/cloud-storage/config');
                 const data = await resp.json();
                 if (data.success) {
-                    document.getElementById('adminCloudFolder').value = data.folder_name || 'BiliSub备份';
-                    if (data.has_config) {
+                    // 设置存储类型
+                    const storageType = data.storage_type || 'gdrive';
+                    document.querySelector(`input[name="storageType"][value="${storageType}"]`).checked = true;
+                    toggleStorageType(storageType);
+
+                    // GDrive 配置
+                    document.getElementById('adminCloudFolder').value = data.folder_name || '';
+                    if (data.has_gdrive_config) {
                         document.getElementById('adminCloudJson').placeholder = '(已配置，留空保留原设置)';
+                    }
+
+                    // WebDAV 配置
+                    document.getElementById('webdavUrl').value = data.webdav_url || '';
+                    document.getElementById('webdavUsername').value = data.webdav_username || '';
+
+                    // 状态显示
+                    if ((storageType === 'gdrive' && data.has_gdrive_config) ||
+                        (storageType === 'webdav' && data.has_webdav_config)) {
                         document.getElementById('adminCloudStatus').innerHTML =
                             '<span style="color: var(--success);">✓ 已配置</span>';
                     }
@@ -967,28 +1029,38 @@
         }
 
         async function saveAdminCloudConfig() {
-            const json = document.getElementById('adminCloudJson').value.trim();
-            const folder = document.getElementById('adminCloudFolder').value.trim() || 'BiliSub备份';
+            const storageType = getSelectedStorageType();
             const status = document.getElementById('adminCloudStatus');
-
             status.innerHTML = '<span style="color: var(--accent-primary);">保存中...</span>';
+
+            const payload = { storage_type: storageType };
+
+            if (storageType === 'gdrive') {
+                payload.service_account_json = document.getElementById('adminCloudJson').value.trim();
+                payload.folder_name = document.getElementById('adminCloudFolder').value.trim();
+            } else {
+                payload.webdav_url = document.getElementById('webdavUrl').value.trim();
+                payload.webdav_username = document.getElementById('webdavUsername').value.trim();
+                payload.webdav_password = document.getElementById('webdavPassword').value;
+            }
 
             try {
                 const resp = await fetch('/api/cloud-storage/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        service_account_json: json,
-                        folder_name: folder
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const data = await resp.json();
 
                 if (data.success) {
                     status.innerHTML = '<span style="color: var(--success);">✓ 配置已保存</span>';
-                    document.getElementById('adminCloudJson').value = '';
-                    document.getElementById('adminCloudJson').placeholder = '(已配置，留空保留原设置)';
-                    showToast('云存储配置已保存', 'success');
+                    if (storageType === 'gdrive') {
+                        document.getElementById('adminCloudJson').value = '';
+                        document.getElementById('adminCloudJson').placeholder = '(已配置，留空保留原设置)';
+                    } else {
+                        document.getElementById('webdavPassword').value = '';
+                    }
+                    showToast(data.message, 'success');
                 } else {
                     status.innerHTML = `<span style="color: var(--error);">✗ ${data.error}</span>`;
                     showToast(data.error, 'error');
@@ -1000,18 +1072,26 @@
         }
 
         async function testAdminCloudConnection() {
+            const storageType = getSelectedStorageType();
             const status = document.getElementById('adminCloudStatus');
-            const json = document.getElementById('adminCloudJson').value.trim();
             status.innerHTML = '<span style="color: var(--accent-primary);">测试连接中...</span>';
 
+            const payload = { storage_type: storageType };
+
+            if (storageType === 'gdrive') {
+                payload.service_account_json = document.getElementById('adminCloudJson').value.trim();
+                payload.folder_name = document.getElementById('adminCloudFolder').value.trim();
+            } else {
+                payload.webdav_url = document.getElementById('webdavUrl').value.trim();
+                payload.webdav_username = document.getElementById('webdavUsername').value.trim();
+                payload.webdav_password = document.getElementById('webdavPassword').value;
+            }
+
             try {
-                // 支持直接测试输入框中的内容（未保存时）
                 const resp = await fetch('/api/cloud-storage/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        service_account_json: json
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const data = await resp.json();
 

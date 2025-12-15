@@ -32,8 +32,14 @@ class User(UserMixin, db.Model):
     self_hosted_domain = db.Column(db.String(500), nullable=True)  # 自建域名
     
     # 云存储配置
+    cloud_storage_type = db.Column(db.String(20), nullable=True, default='gdrive')  # 'gdrive' 或 'webdav'
     cloud_service_account = db.Column(db.Text, nullable=True)  # Google Service Account JSON
-    cloud_folder_name = db.Column(db.String(200), nullable=True)  # 云端文件夹名称
+    cloud_folder_name = db.Column(db.String(200), nullable=True)  # 云端文件夹名称/ID
+    
+    # WebDAV 配置
+    webdav_url = db.Column(db.String(500), nullable=True)  # WebDAV 服务器地址
+    webdav_username = db.Column(db.String(200), nullable=True)  # WebDAV 用户名
+    webdav_password = db.Column(db.String(500), nullable=True)  # WebDAV 密码
     
     # Chrome 插件绑定
     extension_token = db.Column(db.String(64), unique=True, nullable=True, index=True)  # 插件令牌
@@ -317,8 +323,12 @@ def _migrate_users_table():
         
         # 需要添加的列
         migrations = [
+            ('cloud_storage_type', 'VARCHAR(20)'),
             ('cloud_service_account', 'TEXT'),
             ('cloud_folder_name', 'VARCHAR(200)'),
+            ('webdav_url', 'VARCHAR(500)'),
+            ('webdav_username', 'VARCHAR(200)'),
+            ('webdav_password', 'VARCHAR(500)'),
         ]
         
         for column_name, column_type in migrations:
