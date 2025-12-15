@@ -4578,10 +4578,12 @@ function initWebSocket(userId) {
 
     // 连接 WebSocket
     socket = io({
-        transports: ['websocket', 'polling'],
+        // 优先使用 polling (HTTP长轮询)，兼容性最好，能穿透所有反代
+        // 连接成功后会自动升级到 websocket
+        transports: ['polling', 'websocket'],
         reconnection: true,
         reconnectionDelay: 1000,
-        reconnectionAttempts: 5
+        reconnectionAttempts: 10
     });
 
     socket.on('connect', () => {
