@@ -1637,6 +1637,54 @@ body {
     color: var(--text-muted);
 }
 
+/* 历史任务搜索和筛选 - 第二行 */
+.history-filter-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
+.history-search-input {
+    padding: 5px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    width: 140px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.history-search-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.1);
+}
+
+.history-search-input::placeholder {
+    color: var(--text-muted);
+}
+
+.history-up-filter {
+    padding: 5px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    min-width: 80px;
+    max-width: 120px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.history-up-filter:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
 /* 历史视频列表项 */
 .history-video-list .video-item {
     display: flex;

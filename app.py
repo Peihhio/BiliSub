@@ -2307,14 +2307,39 @@ def cleanup_temp_files():
             else:
                 return f"{size / (1024 * 1024):.1f} MB"
         
-        logger.info(f"缓存清理完成: {cleaned_files} 个文件, {format_size(cleaned_size)}")
+        # 4. 执行 Python 垃圾回收，释放内存
+        import gc
+        import sys
+        
+        # 强制垃圾回收
+        gc_collected = gc.collect()
+        gc.collect()  # 多次调用以确保完全回收
+        gc.collect()
+        
+        # 尝试获取内存信息（仅 Linux）
+        memory_freed = None
+        try:
+            import resource
+            # 获取当前进程内存使用
+            mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # macOS 返回字节，Linux 返回 KB
+            if sys.platform == 'darwin':
+                memory_info = f"{mem_usage / (1024 * 1024):.1f} MB"
+            else:
+                memory_info = f"{mem_usage / 1024:.1f} MB"
+        except:
+            memory_info = "不可用"
+        
+        logger.info(f"缓存清理完成: {cleaned_files} 个文件, {format_size(cleaned_size)}, GC回收 {gc_collected} 对象")
         
         return jsonify({
             "success": True,
             "cleaned_files": cleaned_files,
             "cleaned_size": format_size(cleaned_size),
+            "gc_collected": gc_collected,
+            "memory_usage": memory_info,
             "errors": errors if errors else None,
-            "message": f"已清理 {cleaned_files} 个文件，释放 {format_size(cleaned_size)}"
+            "message": f"已清理 {cleaned_files} 个文件，释放 {format_size(cleaned_size)}，回收 {gc_collected} 个对象"
         })
         
     except Exception as e:

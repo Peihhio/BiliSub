@@ -366,10 +366,11 @@
                 <h2>🔌 插件任务</h2>
                 <div class="extension-task-header-right">
                     <span class="extension-task-count" id="extensionTaskCount">0 个进行中</span>
-                    <button type="button" class="extension-clear-failed-btn" id="extensionClearFailedBtn" title="清除失败任务" onclick="clearFailedExtensionTasks()">
+                    <button type="button" class="extension-clear-failed-btn" id="extensionClearFailedBtn" title="清除失败任务"
+                        onclick="clearFailedExtensionTasks()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="3 6 5 6 21 6"/>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                         </svg>
                         清除失败
                     </button>
@@ -497,6 +498,14 @@
                                 </svg>
                             </button>
                         </div>
+                    </div>
+                    <!-- 第二行：UP主筛选（左对齐）和搜索框（右对齐） -->
+                    <div class="history-filter-row">
+                        <select id="historyUpFilter" class="history-up-filter">
+                            <option value="">UP主</option>
+                        </select>
+                        <input type="text" id="historySearchInput" class="history-search-input" placeholder="搜索标题..."
+                            autocomplete="off">
                     </div>
                     <div class="video-list history-video-list" id="historyVideoList">
                         <div class="empty-state">

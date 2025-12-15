@@ -2974,30 +2974,119 @@ async function copyHistoryTranscript(id) {
 }
 
 /**
- * 渲染历史列表（按日期分组）
+ * 更新UP主筛选下拉列表选项
+ */
+function updateUpFilterOptions() {
+    const upFilter = document.getElementById('historyUpFilter');
+    if (!upFilter) return;
+
+    // 收集所有唯一的UP主
+    const owners = new Set();
+    historyData.forEach(item => {
+        if (item.owner) {
+            owners.add(item.owner);
+        }
+    });
+
+    // 按字母排序
+    const sortedOwners = Array.from(owners).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+
+    // 保存当前选中值
+    const currentValue = upFilter.value;
+
+    // 重建选项
+    upFilter.innerHTML = '<option value="">UP主</option>';
+    sortedOwners.forEach(owner => {
+        const option = document.createElement('option');
+        option.value = owner;
+        option.textContent = owner;
+        if (owner === currentValue) {
+            option.selected = true;
+        }
+        upFilter.appendChild(option);
+    });
+}
+
+// 历史搜索和筛选事件监听器
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('historySearchInput');
+    const upFilter = document.getElementById('historyUpFilter');
+
+    // 搜索框防抖
+    let searchTimeout;
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                renderHistoryList();
+            }, 300);
+        });
+    }
+
+    // UP主筛选下拉
+    if (upFilter) {
+        upFilter.addEventListener('change', () => {
+            renderHistoryList();
+        });
+    }
+});
+
+/**
+ * 渲染历史列表（按日期分组，支持搜索和UP主筛选）
  */
 function renderHistoryList() {
     if (!historyVideoList) return;
 
-    if (historyCountSpan) {
-        historyCountSpan.textContent = historyData.length;
+    // 获取搜索和筛选条件
+    const searchInput = document.getElementById('historySearchInput');
+    const upFilter = document.getElementById('historyUpFilter');
+    const searchText = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    const selectedUp = upFilter ? upFilter.value : '';
+
+    // 更新UP主下拉列表选项（收集所有UP主）
+    updateUpFilterOptions();
+
+    // 筛选数据
+    let filteredData = historyData;
+
+    if (searchText) {
+        filteredData = filteredData.filter(item =>
+            (item.title && item.title.toLowerCase().includes(searchText)) ||
+            (item.owner && item.owner.toLowerCase().includes(searchText)) ||
+            (item.transcript && item.transcript.toLowerCase().includes(searchText))
+        );
     }
 
-    if (historyData.length === 0) {
+    if (selectedUp) {
+        filteredData = filteredData.filter(item => item.owner === selectedUp);
+    }
+
+    if (historyCountSpan) {
+        // 显示筛选后的数量 / 总数量
+        if (searchText || selectedUp) {
+            historyCountSpan.textContent = `${filteredData.length}/${historyData.length}`;
+        } else {
+            historyCountSpan.textContent = historyData.length;
+        }
+    }
+
+    if (filteredData.length === 0) {
+        const emptyMessage = (searchText || selectedUp) ? '无匹配的历史记录' : '暂无历史记录';
         historyVideoList.innerHTML = `
             <div class="empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
-                <p>暂无历史记录</p>
+                <p>${emptyMessage}</p>
             </div>
         `;
         return;
     }
 
+
     // 按日期分组
     const groups = {};
-    historyData.forEach(item => {
+    filteredData.forEach(item => {
         // 兼容旧数据（没有dateKey的记录）
         const dateKey = item.dateKey || (item.date ? item.date.split('T')[0] : '未知日期');
         if (!groups[dateKey]) {
@@ -3467,14 +3556,17 @@ async function downloadAsZip(items) {
     for (const item of items) {
         try {
             const mdContent = generateMarkdownContent(item);
-            const safeTitle = item.title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 100);
+            // 文件名格式：标题_UP主.md
+            const safeTitle = item.title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 80);
+            const safeOwner = item.owner ? item.owner.replace(/[<>:"/\\|?*]/g, '_').substring(0, 20) : '';
+            const filename = safeOwner ? `${safeTitle}_${safeOwner}` : safeTitle;
 
             const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
             const url = URL.createObjectURL(blob);
 
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${safeTitle}.md`;
+            a.download = `${filename}.md`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -3572,6 +3664,12 @@ tags: [${tagsStr}]`;
 
     frontmatter += `\n---\n\n`;
 
+    // 添加封面图片（如果有的话）
+    let coverSection = '';
+    if (typeof itemOrTitle === 'object' && itemOrTitle.cover) {
+        coverSection = `![视频封面](${itemOrTitle.cover})\n\n`;
+    }
+
     // 如果有AI处理结果，在正文前显示
     let content = '';
     if (aiAbstract) {
@@ -3579,7 +3677,7 @@ tags: [${tagsStr}]`;
     }
     content += transcript;
 
-    return frontmatter + content;
+    return frontmatter + coverSection + content;
 }
 
 /**
@@ -4479,7 +4577,7 @@ function startExtensionTasksPolling() {
     if (extensionTasksPollingTimer) {
         clearInterval(extensionTasksPollingTimer);
     }
-    extensionTasksPollingTimer = setInterval(fetchExtensionTasks, 3000);
+    extensionTasksPollingTimer = setInterval(fetchExtensionTasks, 10000);
 }
 
 /**
