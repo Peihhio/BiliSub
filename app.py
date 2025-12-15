@@ -4865,8 +4865,12 @@ service_account_file = {sa_file}
                 rclone_conf = f.name
             
             remote_path = 'gdrive:'
+            
+            # 调试：打印生成的配置内容
+            logger.info(f"[云存储] rclone 配置内容:\n{conf_content}")
         
         # 执行同步
+        logger.info(f"[云存储] 执行 rclone copy {sync_dir} -> {remote_path}")
         result = subprocess.run(
             [
                 'rclone', '--config', rclone_conf,
@@ -4876,6 +4880,11 @@ service_account_file = {sa_file}
             ],
             capture_output=True, text=True, timeout=300
         )
+        
+        # 调试：打印完整输出
+        logger.info(f"[云存储] rclone returncode: {result.returncode}")
+        if result.stderr:
+            logger.info(f"[云存储] rclone stderr (前500字符): {result.stderr[:500]}")
         
         # 清理临时文件
         if sa_file:
