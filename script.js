@@ -4602,3 +4602,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 页面卸载前停止轮询
 window.addEventListener('beforeunload', stopExtensionTasksPolling);
+
+// ==================== 云存储功能 ====================
+
+// 执行云同步
+async function executeCloudSync() {
+    const btn = document.getElementById('cloudSyncBtn');
+
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    btn.classList.remove('success');
+
+    try {
+        const resp = await fetch('/api/cloud-storage/sync', { method: 'POST' });
+        const data = await resp.json();
+
+        if (data.success) {
+            showToast(data.message || '同步完成！', 'success');
+            // 显示绿色对号 3 秒
+            btn.textContent = '✓';
+            btn.classList.add('success');
+            setTimeout(() => {
+                btn.textContent = '☁️';
+                btn.classList.remove('success');
+            }, 3000);
+        } else {
+            if (data.error.includes('请先配置')) {
+                // 未配置，提示去管理后台
+                showToast('请先在管理后台配置云存储', 'warning');
+            } else {
+                showToast(data.error || '同步失败', 'error');
+            }
+            btn.textContent = '☁️';
+        }
+    } catch (e) {
+        showToast('同步失败: ' + e.message, 'error');
+        btn.textContent = '☁️';
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// 绑定云同步按钮事件
+document.addEventListener('DOMContentLoaded', () => {
+    const cloudSyncBtn = document.getElementById('cloudSyncBtn');
+    if (cloudSyncBtn) {
+        cloudSyncBtn.addEventListener('click', executeCloudSync);
+    }
+});

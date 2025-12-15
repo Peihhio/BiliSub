@@ -517,6 +517,46 @@
                 </div>
             </div>
         </div>
+
+        <!-- 云存储设置 -->
+        <div class="section">
+            <div class="section-header">
+                <h2>☁️ 云存储同步</h2>
+            </div>
+            <div class="extension-box">
+                <div class="extension-info">
+                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                        将历史字幕自动同步到 Google Drive。使用 Service Account 方式授权。
+                    </p>
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem;">Service Account JSON</label>
+                        <textarea id="adminCloudJson" rows="5" class="invite-code-input"
+                            style="width: 100%; max-width: 600px; font-size: 0.85rem; font-family: monospace;"
+                            placeholder='粘贴 Service Account JSON 内容...'></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem;">目标文件夹名称</label>
+                        <input type="text" id="adminCloudFolder" class="invite-code-input" style="width: 250px;"
+                            placeholder="BiliSub备份">
+                    </div>
+                    <div id="adminCloudStatus" style="margin-bottom: 1rem;"></div>
+                </div>
+                <div class="extension-actions">
+                    <button class="btn btn-secondary" onclick="testAdminCloudConnection()">测试连接</button>
+                    <button class="btn btn-primary" onclick="saveAdminCloudConfig()">保存配置</button>
+                </div>
+                <div class="extension-help" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
+                    <p>📌 使用说明：</p>
+                    <ol style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                        <li>在 <a href="https://console.cloud.google.com" target="_blank"
+                                style="color: var(--accent-primary);">Google Cloud Console</a> 创建项目并启用 Drive API</li>
+                        <li>创建 Service Account，下载 JSON 密钥</li>
+                        <li>在 Google Drive 中共享目标文件夹给 Service Account 邮箱</li>
+                        <li>将 JSON 内容粘贴到上方，保存后在主页点击 ☁️ 即可同步</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 修改邀请码弹窗 -->
@@ -908,11 +948,84 @@
             }
         }
 
+        // ===== 云存储配置 =====
+        async function loadCloudConfig() {
+            try {
+                const resp = await fetch('/api/cloud-storage/config');
+                const data = await resp.json();
+                if (data.success) {
+                    document.getElementById('adminCloudFolder').value = data.folder_name || 'BiliSub备份';
+                    if (data.has_config) {
+                        document.getElementById('adminCloudJson').placeholder = '(已配置，留空保留原设置)';
+                        document.getElementById('adminCloudStatus').innerHTML =
+                            '<span style="color: var(--success);">✓ 已配置</span>';
+                    }
+                }
+            } catch (e) {
+                console.error('加载云存储配置失败:', e);
+            }
+        }
+
+        async function saveAdminCloudConfig() {
+            const json = document.getElementById('adminCloudJson').value.trim();
+            const folder = document.getElementById('adminCloudFolder').value.trim() || 'BiliSub备份';
+            const status = document.getElementById('adminCloudStatus');
+
+            status.innerHTML = '<span style="color: var(--accent-primary);">保存中...</span>';
+
+            try {
+                const resp = await fetch('/api/cloud-storage/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        service_account_json: json,
+                        folder_name: folder
+                    })
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    status.innerHTML = '<span style="color: var(--success);">✓ 配置已保存</span>';
+                    document.getElementById('adminCloudJson').value = '';
+                    document.getElementById('adminCloudJson').placeholder = '(已配置，留空保留原设置)';
+                    showToast('云存储配置已保存', 'success');
+                } else {
+                    status.innerHTML = `<span style="color: var(--error);">✗ ${data.error}</span>`;
+                    showToast(data.error, 'error');
+                }
+            } catch (e) {
+                status.innerHTML = `<span style="color: var(--error);">✗ 请求失败</span>`;
+                showToast('保存失败', 'error');
+            }
+        }
+
+        async function testAdminCloudConnection() {
+            const status = document.getElementById('adminCloudStatus');
+            status.innerHTML = '<span style="color: var(--accent-primary);">测试连接中...</span>';
+
+            try {
+                const resp = await fetch('/api/cloud-storage/test', { method: 'POST' });
+                const data = await resp.json();
+
+                if (data.success) {
+                    status.innerHTML = `<span style="color: var(--success);">✓ ${data.message}</span>`;
+                    showToast(data.message, 'success');
+                } else {
+                    status.innerHTML = `<span style="color: var(--error);">✗ ${data.error}</span>`;
+                    showToast(data.error, 'error');
+                }
+            } catch (e) {
+                status.innerHTML = `<span style="color: var(--error);">✗ 请求失败</span>`;
+                showToast('测试失败', 'error');
+            }
+        }
+
         // 初始化
         loadStats();
         loadInviteCode();
         loadUsers();
         loadExtensionStatus();
+        loadCloudConfig();
     </script>
 </body>
 

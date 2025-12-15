@@ -31,6 +31,10 @@ class User(UserMixin, db.Model):
     use_self_hosted = db.Column(db.Boolean, default=False)  # 是否使用自建存储
     self_hosted_domain = db.Column(db.String(500), nullable=True)  # 自建域名
     
+    # 云存储配置
+    cloud_service_account = db.Column(db.Text, nullable=True)  # Google Service Account JSON
+    cloud_folder_name = db.Column(db.String(200), nullable=True)  # 云端文件夹名称
+    
     # Chrome 插件绑定
     extension_token = db.Column(db.String(64), unique=True, nullable=True, index=True)  # 插件令牌
     extension_last_sync = db.Column(db.DateTime, nullable=True)  # 插件最后同步时间
@@ -203,6 +207,7 @@ def init_database(app):
         # 数据库迁移：检查并添加缺失的列
         _migrate_extension_tasks_table()
         _migrate_history_items_table()
+        _migrate_users_table()
         
         # 检查是否存在管理员账户
         admin = User.query.filter_by(username='admin').first()
@@ -296,3 +301,31 @@ def _migrate_history_items_table():
         db.session.commit()
     except Exception as e:
         print(f'[WARNING] history_items 数据库迁移失败: {e}')
+
+
+def _migrate_users_table():
+    """检查并添加 users 表中缺失的列（云存储功能）"""
+    try:
+        # 检查表是否存在
+        result = db.session.execute(db.text("SELECT name FROM sqlite_master WHERE type='table' AND name='users'"))
+        if not result.fetchone():
+            return
+        
+        # 获取现有列
+        result = db.session.execute(db.text("PRAGMA table_info(users)"))
+        existing_columns = {row[1] for row in result.fetchall()}
+        
+        # 需要添加的列
+        migrations = [
+            ('cloud_service_account', 'TEXT'),
+            ('cloud_folder_name', 'VARCHAR(200)'),
+        ]
+        
+        for column_name, column_type in migrations:
+            if column_name not in existing_columns:
+                db.session.execute(db.text(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}"))
+                print(f'[INFO] 数据库迁移: 添加列 users.{column_name}')
+        
+        db.session.commit()
+    except Exception as e:
+        print(f'[WARNING] users 数据库迁移失败: {e}')

@@ -6,10 +6,16 @@ FROM python:3.11-slim
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖
+# 安装系统依赖（包括 rclone 用于云存储同步）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    unzip \
+    && curl -O https://downloads.rclone.org/current/rclone-current-linux-amd64.zip \
+    && unzip rclone-current-linux-amd64.zip \
+    && cp rclone-*-linux-amd64/rclone /usr/bin/ \
+    && chmod 755 /usr/bin/rclone \
+    && rm -rf rclone-* \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件并安装 Python 依赖

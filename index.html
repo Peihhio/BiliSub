@@ -6,10 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="B站视频字幕提取工具 - 使用阿里云Paraformer AI语音识别技术从B站视频中提取字幕">
     <title>BiliSub - B站字幕提取</title>
-    <!-- 使用国内 CDN 镜像加速字体加载 -->
-    <link rel="preconnect" href="https://fonts.loli.net" crossorigin>
-    <link href="https://fonts.loli.net/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=202512151030">
 </head>
 
 <body>
@@ -499,13 +496,18 @@
                             </button>
                         </div>
                     </div>
-                    <!-- 第二行：UP主筛选（左对齐）和搜索框（右对齐） -->
+                    <!-- 第二行：UP主筛选（左对齐）和搜索框 + 云同步（右对齐） -->
                     <div class="history-filter-row">
                         <select id="historyUpFilter" class="history-up-filter">
                             <option value="">UP主</option>
                         </select>
-                        <input type="text" id="historySearchInput" class="history-search-input" placeholder="搜索标题..."
-                            autocomplete="off">
+                        <div class="history-filter-right">
+                            <input type="text" id="historySearchInput" class="history-search-input" placeholder="搜索..."
+                                autocomplete="off">
+                            <button type="button" id="cloudSyncBtn" class="cloud-sync-btn" title="同步到云端">
+                                ☁️
+                            </button>
+                        </div>
                     </div>
                     <div class="video-list history-video-list" id="historyVideoList">
                         <div class="empty-state">
@@ -560,10 +562,7 @@
         </div>
     </div>
 
-    <!-- 外部库使用 defer 加载，不阻塞页面渲染 -->
-    <script defer src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="script.js?v=202512122345" defer></script>
+    <script src="script.js?v=202512151028" defer></script>
 </body>
 
 </html>

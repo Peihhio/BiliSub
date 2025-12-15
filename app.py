@@ -4495,6 +4495,219 @@ def check_history_update(id):
     })
 
 
+# ==================== 云存储同步 API ====================
+
+@app.route('/api/cloud-storage/config', methods=['GET', 'POST'])
+@login_required
+def cloud_storage_config():
+    """
+    获取或保存云存储配置
+    
+    POST 请求体:
+        {
+            "service_account_json": "{...}",  # Google Service Account JSON
+            "folder_name": "BiliSub备份"       # 目标文件夹名称
+        }
+    """
+    
+    if request.method == 'GET':
+        return jsonify({
+            'success': True,
+            'has_config': bool(current_user.cloud_service_account),
+            'folder_name': current_user.cloud_folder_name or 'BiliSub备份'
+        })
+    
+    # POST - 保存配置
+    data = request.get_json() or {}
+    service_account_json = data.get('service_account_json', '')
+    folder_name = data.get('folder_name', 'BiliSub备份').strip() or 'BiliSub备份'
+    
+    # 验证 JSON 格式
+    if service_account_json:
+        try:
+            import json
+            sa_data = json.loads(service_account_json)
+            if 'type' not in sa_data or sa_data.get('type') != 'service_account':
+                return jsonify({'success': False, 'error': 'JSON 格式不正确，请确保是 Service Account 密钥文件'}), 400
+            if 'client_email' not in sa_data or 'private_key' not in sa_data:
+                return jsonify({'success': False, 'error': 'Service Account JSON 缺少必要字段'}), 400
+        except json.JSONDecodeError:
+            return jsonify({'success': False, 'error': 'JSON 格式解析失败'}), 400
+    
+    try:
+        current_user.cloud_service_account = service_account_json
+        current_user.cloud_folder_name = folder_name
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '云存储配置已保存'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/cloud-storage/test', methods=['POST'])
+@login_required
+def cloud_storage_test():
+    """
+    测试云存储连接
+    """
+    import subprocess
+    import tempfile
+    import json
+    
+    if not current_user.cloud_service_account:
+        return jsonify({'success': False, 'error': '请先配置 Service Account'}), 400
+    
+    try:
+        # 创建临时 rclone 配置
+        sa_data = json.loads(current_user.cloud_service_account)
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(sa_data, f)
+            sa_file = f.name
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
+            f.write(f"""[gdrive]
+type = drive
+scope = drive
+service_account_file = {sa_file}
+""")
+            rclone_conf = f.name
+        
+        # 测试连接
+        result = subprocess.run(
+            ['rclone', '--config', rclone_conf, 'lsd', 'gdrive:', '--max-depth', '1'],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        # 清理临时文件
+        os.unlink(sa_file)
+        os.unlink(rclone_conf)
+        
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'message': '连接成功！已检测到 Google Drive'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'连接失败: {result.stderr}'
+            }), 400
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': '连接超时'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/cloud-storage/sync', methods=['POST'])
+@login_required
+def cloud_storage_sync():
+    """
+    执行云存储同步（仅上传新增文件）
+    """
+    from models import HistoryItem
+    import subprocess
+    import tempfile
+    import json
+    
+    if not current_user.cloud_service_account:
+        return jsonify({'success': False, 'error': '请先配置 Service Account'}), 400
+    
+    folder_name = current_user.cloud_folder_name or 'BiliSub备份'
+    
+    # 获取所有历史记录
+    history_items = HistoryItem.query.filter_by(user_id=current_user.id).all()
+    if not history_items:
+        return jsonify({'success': True, 'message': '暂无历史记录需要同步', 'synced': 0})
+    
+    try:
+        # 创建临时目录存放 MD 文件
+        import shutil
+        sync_dir = tempfile.mkdtemp(prefix='bilisub_sync_')
+        
+        # 生成 MD 文件
+        for item in history_items:
+            # 生成文件名: 标题_UP主.md
+            safe_title = (item.title or 'untitled').replace('/', '_').replace('\\', '_')[:80]
+            safe_owner = (item.owner or '').replace('/', '_').replace('\\', '_')[:20]
+            filename = f"{safe_title}_{safe_owner}.md" if safe_owner else f"{safe_title}.md"
+            
+            # 生成 MD 内容
+            content = f"""---
+title: "{item.title or ''}"
+type: 视频字幕
+author: "{item.owner or ''}"
+url: "{item.url or ''}"
+bvid: "{item.bvid or ''}"
+---
+
+"""
+            if item.cover:
+                content += f"![视频封面]({item.cover})\n\n"
+            if item.ai_summary:
+                content += f"## AI 处理结果\n\n{item.ai_summary}\n\n---\n\n"
+            content += f"## 字幕内容\n\n{item.transcript or ''}\n"
+            
+            filepath = os.path.join(sync_dir, filename)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+        
+        # 创建 rclone 配置
+        sa_data = json.loads(current_user.cloud_service_account)
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(sa_data, f)
+            sa_file = f.name
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
+            f.write(f"""[gdrive]
+type = drive
+scope = drive
+service_account_file = {sa_file}
+""")
+            rclone_conf = f.name
+        
+        # 执行同步（仅复制新文件，不删除）
+        result = subprocess.run(
+            [
+                'rclone', '--config', rclone_conf, 
+                'copy', sync_dir, f'gdrive:{folder_name}',
+                '--ignore-existing',  # 仅上传新文件
+                '-v'
+            ],
+            capture_output=True, text=True, timeout=300
+        )
+        
+        # 清理临时文件
+        os.unlink(sa_file)
+        os.unlink(rclone_conf)
+        shutil.rmtree(sync_dir)
+        
+        if result.returncode == 0:
+            # 统计上传的文件数
+            uploaded = result.stderr.count('Copied')
+            return jsonify({
+                'success': True,
+                'message': f'同步完成！已上传 {uploaded} 个文件到 {folder_name}',
+                'synced': uploaded
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'同步失败: {result.stderr}'
+            }), 500
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': '同步超时'}), 500
+    except Exception as e:
+        logger.error(f"云存储同步失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info("B站字幕提取服务启动")
