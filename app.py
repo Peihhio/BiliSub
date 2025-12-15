@@ -4859,8 +4859,6 @@ type = drive
 scope = drive
 service_account_file = {sa_file}
 """
-                if folder_name:
-                    conf_content += f"root_folder_id = {folder_name}\n"
                 f.write(conf_content)
                 rclone_conf = f.name
             
@@ -4868,16 +4866,26 @@ service_account_file = {sa_file}
             
             # 调试：打印生成的配置内容
             logger.info(f"[云存储] rclone 配置内容:\n{conf_content}")
+            logger.info(f"[云存储] 使用 --drive-root-folder-id={folder_name}")
         
         # 执行同步
         logger.info(f"[云存储] 执行 rclone copy {sync_dir} -> {remote_path}")
+        
+        # 构建命令
+        cmd = [
+            'rclone', '--config', rclone_conf,
+            'copy', sync_dir, remote_path,
+            '--ignore-existing',
+            '-v'
+        ]
+        
+        # 对于 GDrive，添加 --drive-root-folder-id 参数
+        if storage_type != 'webdav' and folder_name:
+            cmd.extend(['--drive-root-folder-id', folder_name])
+            logger.info(f"[云存储] 添加参数: --drive-root-folder-id {folder_name}")
+        
         result = subprocess.run(
-            [
-                'rclone', '--config', rclone_conf,
-                'copy', sync_dir, remote_path,
-                '--ignore-existing',
-                '-v'
-            ],
+            cmd,
             capture_output=True, text=True, timeout=300
         )
         
