@@ -4668,7 +4668,7 @@ function startExtensionTasksPolling() {
 
     // 尝试 WebSocket，失败则回退轮询
     // userId 从 current_user 获取，通过 API 接口获取
-    fetch('/api/user/me')
+    fetch('/api/me')
         .then(resp => resp.json())
         .then(data => {
             if (data.success && data.user?.id) {
