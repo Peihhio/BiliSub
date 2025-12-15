@@ -35,6 +35,6 @@ EXPOSE 5001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5001/api/health || exit 1
 
-# 使用 gunicorn 生产服务器启动
-# 注意：使用单 worker + 多线程模式，确保 SQLite 和 Session 的一致性
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "1", "--threads", "8", "--timeout", "120", "app:app"]
+# 使用 gunicorn + eventlet 生产服务器启动 (支持 WebSocket)
+# 注意：使用单 worker + eventlet 异步模式，确保 SQLite 和 Session 的一致性
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--worker-class", "eventlet", "--workers", "1", "--timeout", "120", "app:app"]

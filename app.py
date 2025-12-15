@@ -15,6 +15,7 @@ from http import HTTPStatus
 from flask import Flask, request, jsonify, send_from_directory, Response, redirect, url_for, render_template
 from flask_cors import CORS
 from flask_login import LoginManager, login_required, current_user
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
@@ -55,6 +56,9 @@ def get_or_create_secret_key():
 app.secret_key = get_or_create_secret_key()
 CORS(app)
 
+# 初始化 SocketIO (WebSocket 支持)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+
 # 数据库配置
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_DIR = os.path.join(BASE_DIR, 'database')
@@ -91,6 +95,52 @@ app.register_blueprint(admin_bp)
 # 初始化数据库（创建表和默认管理员）
 with app.app_context():
     init_database(app)
+
+# ==================== WebSocket 事件处理 ====================
+
+# 用户房间映射 (user_id -> set of sid)
+user_rooms = {}
+
+@socketio.on('connect')
+def handle_connect():
+    """客户端连接时加入用户专属房间"""
+    pass  # 连接后通过 join_user_room 加入房间
+
+@socketio.on('join_user_room')
+def handle_join(data):
+    """用户登录后加入专属房间，只接收自己的任务更新"""
+    user_id = data.get('user_id')
+    if user_id:
+        room = f'user_{user_id}'
+        join_room(room)
+        logger.info(f'[WebSocket] 用户 {user_id} 加入房间 {room}')
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """客户端断开连接"""
+    pass
+
+def push_task_update(user_id: int, task_data: dict):
+    """
+    推送任务状态更新给指定用户
+    
+    Args:
+        user_id: 用户 ID
+        task_data: 任务数据字典 (与 ExtensionTask.to_dict() 格式一致)
+    """
+    room = f'user_{user_id}'
+    socketio.emit('task_update', task_data, room=room)
+
+def push_all_tasks(user_id: int, tasks: list):
+    """
+    推送用户的所有任务列表
+    
+    Args:
+        user_id: 用户 ID
+        tasks: 任务列表
+    """
+    room = f'user_{user_id}'
+    socketio.emit('tasks_list', {'tasks': tasks}, room=room)
 
 # 临时文件目录
 TEMP_DIR = tempfile.gettempdir()
@@ -464,6 +514,26 @@ class ExtensionTaskManager:
             self._sync_to_db(task_id, task)
         except Exception as e:
             logger.error(f"[ExtensionTask] 更新任务时数据库同步失败: {e}")
+        
+        # 推送 WebSocket 更新
+        user_id = task.get('user_id')
+        if user_id:
+            try:
+                push_task_update(user_id, {
+                    'task_id': task_id,
+                    'bvid': task.get('bvid'),
+                    'title': task.get('title'),
+                    'cover': task.get('cover'),
+                    'owner': task.get('owner'),
+                    'status': task.get('status'),
+                    'progress': task.get('progress'),
+                    'stage_desc': task.get('stage_desc'),
+                    'error': task.get('error'),
+                    'transcript': task.get('transcript'),
+                    'updated_at': task.get('updated_at')
+                })
+            except Exception as e:
+                logger.debug(f"[WebSocket] 推送任务更新失败: {e}")
         
         return True
     

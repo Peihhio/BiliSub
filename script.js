@@ -4340,8 +4340,6 @@ function updateGuestQuotaDisplay() {
 
 // ================== 插件任务显示功能 ==================
 
-let extensionTasksPollingTimer = null;
-
 /**
  * 获取并显示插件任务
  */
@@ -4567,32 +4565,134 @@ async function deleteExtensionTask(taskId) {
 }
 
 /**
- * 开始插件任务轮询
+ * WebSocket 连接和事件处理
  */
-function startExtensionTasksPolling() {
-    // 立即获取一次
-    fetchExtensionTasks();
+let socket = null;
 
-    // 每 3 秒轮询一次
-    if (extensionTasksPollingTimer) {
-        clearInterval(extensionTasksPollingTimer);
+function initWebSocket(userId) {
+    if (typeof io === 'undefined') {
+        console.warn('[WebSocket] Socket.IO 未加载，回退到轮询模式');
+        startPollingFallback();
+        return;
     }
-    extensionTasksPollingTimer = setInterval(fetchExtensionTasks, 10000);
+
+    // 连接 WebSocket
+    socket = io({
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 5
+    });
+
+    socket.on('connect', () => {
+        console.log('[WebSocket] 已连接');
+        // 加入用户专属房间
+        socket.emit('join_user_room', { user_id: userId });
+        // 首次连接时获取一次任务列表
+        fetchExtensionTasks();
+    });
+
+    socket.on('disconnect', () => {
+        console.log('[WebSocket] 已断开');
+    });
+
+    socket.on('connect_error', (error) => {
+        console.warn('[WebSocket] 连接失败，回退到轮询模式:', error.message);
+        startPollingFallback();
+    });
+
+    // 监听单个任务更新
+    socket.on('task_update', (taskData) => {
+        console.log('[WebSocket] 收到任务更新:', taskData.task_id, taskData.status);
+        handleTaskUpdate(taskData);
+    });
+
+    // 监听任务列表更新
+    socket.on('tasks_list', (data) => {
+        console.log('[WebSocket] 收到任务列表:', data.tasks?.length);
+        if (data.tasks) {
+            renderExtensionTasks(data.tasks);
+        }
+    });
+}
+
+// 存储当前任务列表（用于增量更新）
+let _extensionTasksCache = [];
+
+function handleTaskUpdate(taskData) {
+    // 如果任务完成，刷新历史列表
+    if (taskData.status === 'completed' && !_completedExtensionTaskIds.has(taskData.task_id)) {
+        _completedExtensionTaskIds.add(taskData.task_id);
+        console.log('[WebSocket] 任务完成，刷新历史列表');
+        loadHistoryData().then(() => renderHistoryList());
+    }
+
+    // 更新缓存
+    const existingIndex = _extensionTasksCache.findIndex(t => t.task_id === taskData.task_id);
+    if (existingIndex >= 0) {
+        _extensionTasksCache[existingIndex] = { ..._extensionTasksCache[existingIndex], ...taskData };
+    } else {
+        _extensionTasksCache.unshift(taskData);
+    }
+
+    // 重新渲染
+    renderExtensionTasks(_extensionTasksCache);
 }
 
 /**
- * 停止插件任务轮询
+ * 轮询回退模式（WebSocket 不可用时使用）
  */
-function stopExtensionTasksPolling() {
+let extensionTasksPollingTimer = null;
+
+function startPollingFallback() {
+    if (extensionTasksPollingTimer) return; // 避免重复启动
+
+    console.log('[Polling] 启动轮询回退模式');
+    fetchExtensionTasks();
+    extensionTasksPollingTimer = setInterval(fetchExtensionTasks, 10000);
+}
+
+function stopPollingFallback() {
     if (extensionTasksPollingTimer) {
         clearInterval(extensionTasksPollingTimer);
         extensionTasksPollingTimer = null;
     }
 }
 
-// 页面加载后启动插件任务轮询
+/**
+ * 初始化 WebSocket 或轮询
+ */
+function startExtensionTasksPolling() {
+    // 立即获取一次
+    fetchExtensionTasks();
+
+    // 尝试 WebSocket，失败则回退轮询
+    // userId 从 current_user 获取，通过 API 接口获取
+    fetch('/api/user/me')
+        .then(resp => resp.json())
+        .then(data => {
+            if (data.success && data.user?.id) {
+                initWebSocket(data.user.id);
+            } else {
+                startPollingFallback();
+            }
+        })
+        .catch(() => startPollingFallback());
+}
+
+/**
+ * 停止 WebSocket 和轮询
+ */
+function stopExtensionTasksPolling() {
+    stopPollingFallback();
+    if (socket) {
+        socket.disconnect();
+        socket = null;
+    }
+}
+
+// 页面加载后启动
 document.addEventListener('DOMContentLoaded', () => {
-    // 延迟启动，等待用户状态加载完成
     setTimeout(() => {
         if (!isGuestUser) {
             startExtensionTasksPolling();
@@ -4600,7 +4700,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 2000);
 });
 
-// 页面卸载前停止轮询
+// 页面卸载前停止
 window.addEventListener('beforeunload', stopExtensionTasksPolling);
 
 // ==================== 云存储功能 ====================
