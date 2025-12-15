@@ -4677,17 +4677,19 @@ def cloud_storage_test():
 type = webdav
 url = {webdav_url}
 """
-                if webdav_username:
-                    conf_content += f"user = {webdav_username}\n"
-                if webdav_password:
-                    conf_content += f"pass = {webdav_password}\n"
-                
                 f.write(conf_content)
                 rclone_conf = f.name
             
+            # 构建命令，使用命令行参数传递用户名和密码（明文）
+            cmd = ['rclone', '--config', rclone_conf, 'lsd', 'webdav:', '--max-depth', '1']
+            if webdav_username:
+                cmd.extend(['--webdav-user', webdav_username])
+            if webdav_password:
+                cmd.extend(['--webdav-pass', webdav_password])
+            
             # 测试连接
             result = subprocess.run(
-                ['rclone', '--config', rclone_conf, 'lsd', 'webdav:', '--max-depth', '1'],
+                cmd,
                 capture_output=True, text=True, timeout=30
             )
             
@@ -4819,17 +4821,17 @@ bvid: "{item.bvid or ''}"
         
         # 根据存储类型创建 rclone 配置
         sa_file = None
+        webdav_user = None
+        webdav_pass = None
         if storage_type == 'webdav':
-            # WebDAV 配置
+            # WebDAV 配置（用户名密码通过 CLI 参数传递）
+            webdav_user = current_user.webdav_username
+            webdav_pass = current_user.webdav_password
             with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
                 conf_content = f"""[webdav]
 type = webdav
 url = {current_user.webdav_url}
 """
-                if current_user.webdav_username:
-                    conf_content += f"user = {current_user.webdav_username}\n"
-                if current_user.webdav_password:
-                    conf_content += f"pass = {current_user.webdav_password}\n"
                 f.write(conf_content)
                 rclone_conf = f.name
             
@@ -4883,6 +4885,13 @@ service_account_file = {sa_file}
         if storage_type != 'webdav' and folder_name:
             cmd.extend(['--drive-root-folder-id', folder_name])
             logger.info(f"[云存储] 添加参数: --drive-root-folder-id {folder_name}")
+        
+        # 对于 WebDAV，添加用户名密码参数
+        if storage_type == 'webdav':
+            if webdav_user:
+                cmd.extend(['--webdav-user', webdav_user])
+            if webdav_pass:
+                cmd.extend(['--webdav-pass', webdav_pass])
         
         result = subprocess.run(
             cmd,
