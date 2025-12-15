@@ -4628,12 +4628,23 @@ def cloud_storage_test():
     import tempfile
     import json
     
-    if not current_user.cloud_service_account:
+    # 优先使用请求中的 JSON（用于测试未保存的配置）
+    request_data = request.get_json() or {}
+    sa_json_str = request_data.get('service_account_json')
+    
+    # 回退到已保存的配置
+    if not sa_json_str:
+        sa_json_str = current_user.cloud_service_account
+        
+    if not sa_json_str:
         return jsonify({'success': False, 'error': '请先配置 Service Account'}), 400
     
     try:
         # 创建临时 rclone 配置
-        sa_data = json.loads(current_user.cloud_service_account)
+        if isinstance(sa_json_str, str):
+            sa_data = json.loads(sa_json_str)
+        else:
+            sa_data = sa_json_str
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(sa_data, f)

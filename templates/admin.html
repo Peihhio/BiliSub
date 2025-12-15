@@ -1001,10 +1001,18 @@
 
         async function testAdminCloudConnection() {
             const status = document.getElementById('adminCloudStatus');
+            const json = document.getElementById('adminCloudJson').value.trim();
             status.innerHTML = '<span style="color: var(--accent-primary);">测试连接中...</span>';
 
             try {
-                const resp = await fetch('/api/cloud-storage/test', { method: 'POST' });
+                // 支持直接测试输入框中的内容（未保存时）
+                const resp = await fetch('/api/cloud-storage/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        service_account_json: json
+                    })
+                });
                 const data = await resp.json();
 
                 if (data.success) {
