@@ -4571,26 +4571,20 @@ def check_history_update(id):
 @login_required
 def cloud_storage_config():
     """
-    获取或保存云存储配置
+    获取或保存 WebDAV 云存储配置
     
     POST 请求体:
         {
-            "storage_type": "gdrive" | "webdav",
-            "service_account_json": "{...}",  # Google Service Account JSON (gdrive)
-            "folder_name": "文件夹ID",         # 目标文件夹 ID (gdrive)
-            "webdav_url": "https://...",       # WebDAV 服务器地址
-            "webdav_username": "user",         # WebDAV 用户名
-            "webdav_password": "pass"          # WebDAV 密码
+            "webdav_url": "https://...",
+            "webdav_username": "user",
+            "webdav_password": "pass"
         }
     """
     
     if request.method == 'GET':
         return jsonify({
             'success': True,
-            'storage_type': current_user.cloud_storage_type or 'gdrive',
-            'has_gdrive_config': bool(current_user.cloud_service_account),
-            'folder_name': current_user.cloud_folder_name or '',
-            'has_webdav_config': bool(current_user.webdav_url),
+            'has_config': bool(current_user.webdav_url),
             'webdav_url': current_user.webdav_url or '',
             'webdav_username': current_user.webdav_username or ''
             # 不返回密码
@@ -4598,51 +4592,24 @@ def cloud_storage_config():
     
     # POST - 保存配置
     data = request.get_json() or {}
-    storage_type = data.get('storage_type', 'gdrive')
     
     try:
-        current_user.cloud_storage_type = storage_type
+        webdav_url = data.get('webdav_url', '').strip()
+        webdav_username = data.get('webdav_username', '').strip()
+        webdav_password = data.get('webdav_password', '')
         
-        if storage_type == 'gdrive':
-            # Google Drive 配置
-            service_account_json = data.get('service_account_json', '')
-            folder_name = data.get('folder_name', '').strip()
-            
-            # 验证 JSON 格式
-            if service_account_json:
-                import json
-                try:
-                    sa_data = json.loads(service_account_json)
-                    if 'type' not in sa_data or sa_data.get('type') != 'service_account':
-                        return jsonify({'success': False, 'error': 'JSON 格式不正确，请确保是 Service Account 密钥文件'}), 400
-                    if 'client_email' not in sa_data or 'private_key' not in sa_data:
-                        return jsonify({'success': False, 'error': 'Service Account JSON 缺少必要字段'}), 400
-                except json.JSONDecodeError:
-                    return jsonify({'success': False, 'error': 'JSON 格式解析失败'}), 400
-                    
-                current_user.cloud_service_account = service_account_json
-            
-            if folder_name:
-                current_user.cloud_folder_name = folder_name
-                
-        elif storage_type == 'webdav':
-            # WebDAV 配置
-            webdav_url = data.get('webdav_url', '').strip()
-            webdav_username = data.get('webdav_username', '').strip()
-            webdav_password = data.get('webdav_password', '')
-            
-            if webdav_url:
-                current_user.webdav_url = webdav_url
-            if webdav_username:
-                current_user.webdav_username = webdav_username
-            if webdav_password:
-                current_user.webdav_password = webdav_password
+        if webdav_url:
+            current_user.webdav_url = webdav_url
+        if webdav_username:
+            current_user.webdav_username = webdav_username
+        if webdav_password:
+            current_user.webdav_password = webdav_password
         
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'message': f'{storage_type.upper()} 配置已保存'
+            'message': 'WebDAV 配置已保存'
         })
     except Exception as e:
         db.session.rollback()
@@ -4653,147 +4620,82 @@ def cloud_storage_config():
 @login_required
 def cloud_storage_test():
     """
-    测试云存储连接（支持 GDrive 和 WebDAV）
+    测试 WebDAV 云存储连接
     """
     import subprocess
     import tempfile
-    import json
     
     request_data = request.get_json() or {}
-    storage_type = request_data.get('storage_type') or current_user.cloud_storage_type or 'gdrive'
     
-    if storage_type == 'webdav':
-        # ===== WebDAV 测试 =====
-        webdav_url = request_data.get('webdav_url') or current_user.webdav_url
-        webdav_username = request_data.get('webdav_username') or current_user.webdav_username
-        webdav_password = request_data.get('webdav_password') or current_user.webdav_password
+    webdav_url = request_data.get('webdav_url') or current_user.webdav_url
+    webdav_username = request_data.get('webdav_username') or current_user.webdav_username
+    webdav_password = request_data.get('webdav_password') or current_user.webdav_password
+    
+    if not webdav_url:
+        return jsonify({'success': False, 'error': '请先配置 WebDAV 地址'}), 400
+    
+    try:
+        # 使用 rclone obscure 加密密码
+        obscured_pass = None
+        if webdav_password:
+            obscure_result = subprocess.run(
+                ['rclone', 'obscure', webdav_password],
+                capture_output=True, text=True, timeout=10
+            )
+            if obscure_result.returncode == 0:
+                obscured_pass = obscure_result.stdout.strip()
+            else:
+                logger.warning(f"[WebDAV] rclone obscure 失败: {obscure_result.stderr}")
         
-        if not webdav_url:
-            return jsonify({'success': False, 'error': '请先配置 WebDAV 地址'}), 400
-        
-        try:
-            # 使用 rclone obscure 加密密码
-            obscured_pass = None
-            if webdav_password:
-                obscure_result = subprocess.run(
-                    ['rclone', 'obscure', webdav_password],
-                    capture_output=True, text=True, timeout=10
-                )
-                if obscure_result.returncode == 0:
-                    obscured_pass = obscure_result.stdout.strip()
-                else:
-                    logger.warning(f"[WebDAV] rclone obscure 失败: {obscure_result.stderr}")
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
-                conf_content = f"""[webdav]
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
+            conf_content = f"""[webdav]
 type = webdav
 url = {webdav_url}
 """
-                if webdav_username:
-                    conf_content += f"user = {webdav_username}\n"
-                if obscured_pass:
-                    conf_content += f"pass = {obscured_pass}\n"
-                
-                f.write(conf_content)
-                rclone_conf = f.name
+            if webdav_username:
+                conf_content += f"user = {webdav_username}\n"
+            if obscured_pass:
+                conf_content += f"pass = {obscured_pass}\n"
             
-            # 测试连接
-            result = subprocess.run(
-                ['rclone', '--config', rclone_conf, 'lsd', 'webdav:', '--max-depth', '1'],
-                capture_output=True, text=True, timeout=30
-            )
-            
-            os.unlink(rclone_conf)
-            
-            if result.returncode == 0:
-                return jsonify({
-                    'success': True,
-                    'message': f'WebDAV 连接成功！服务器: {webdav_url}'
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': f'WebDAV 连接失败: {result.stderr}'
-                }), 400
-                
-        except Exception as e:
-            return jsonify({'success': False, 'error': f'WebDAV 测试失败: {str(e)}'}), 500
-    
-    else:
-        # ===== Google Drive 测试 =====
-        sa_json_str = request_data.get('service_account_json') or current_user.cloud_service_account
+            f.write(conf_content)
+            rclone_conf = f.name
         
-        if not sa_json_str:
-            return jsonify({'success': False, 'error': '请先配置 Service Account'}), 400
+        # 测试连接
+        result = subprocess.run(
+            ['rclone', '--config', rclone_conf, 'lsd', 'webdav:', '--max-depth', '1'],
+            capture_output=True, text=True, timeout=30
+        )
         
-        try:
-            if isinstance(sa_json_str, str):
-                sa_data = json.loads(sa_json_str)
-            else:
-                sa_data = sa_json_str
+        os.unlink(rclone_conf)
+        
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'message': f'WebDAV 连接成功！服务器: {webdav_url}'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'WebDAV 连接失败: {result.stderr}'
+            }), 400
             
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                json.dump(sa_data, f)
-                sa_file = f.name
-            
-            folder_name = request_data.get('folder_name') or current_user.cloud_folder_name or ""
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
-                conf_content = f"""[gdrive]
-type = drive
-scope = drive
-service_account_file = {sa_file}
-"""
-                if folder_name and len(folder_name) > 20:
-                    conf_content += f"root_folder_id = {folder_name}\n"
-                    
-                f.write(conf_content)
-                rclone_conf = f.name
-            
-            result = subprocess.run(
-                ['rclone', '--config', rclone_conf, 'lsd', 'gdrive:', '--max-depth', '1'],
-                capture_output=True, text=True, timeout=30
-            )
-            
-            os.unlink(sa_file)
-            os.unlink(rclone_conf)
-            
-            if result.returncode == 0:
-                return jsonify({
-                    'success': True,
-                    'message': f'Google Drive 连接成功！' + (f'(文件夹 ID: {folder_name[:20]}...)' if folder_name else '')
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': f'连接失败: {result.stderr}'
-                }), 400
-                
-        except Exception as e:
-            return jsonify({'success': False, 'error': f'测试失败: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'WebDAV 测试失败: {str(e)}'}), 500
 
 
 @app.route('/api/cloud-storage/sync', methods=['POST'])
 @login_required
 def cloud_storage_sync():
     """
-    执行云存储同步（支持 GDrive 和 WebDAV）
+    执行 WebDAV 云存储同步
     """
     from models import HistoryItem
     import subprocess
     import tempfile
     import shutil
-    import json
     
-    storage_type = current_user.cloud_storage_type or 'gdrive'
-    
-    # 检查配置
-    if storage_type == 'webdav':
-        if not current_user.webdav_url:
-            return jsonify({'success': False, 'error': '请先配置 WebDAV 地址'}), 400
-    else:
-        if not current_user.cloud_service_account:
-            return jsonify({'success': False, 'error': '请先配置 Service Account'}), 400
+    if not current_user.webdav_url:
+        return jsonify({'success': False, 'error': '请先配置 WebDAV 地址'}), 400
     
     try:
         # 获取所有历史记录
@@ -4829,98 +4731,45 @@ bvid: "{item.bvid or ''}"
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
         
-        # 根据存储类型创建 rclone 配置
-        sa_file = None
-        if storage_type == 'webdav':
-            # WebDAV 配置：使用 rclone obscure 加密密码
-            webdav_user = current_user.webdav_username
-            webdav_password = current_user.webdav_password
-            
-            obscured_pass = None
-            if webdav_password:
-                obscure_result = subprocess.run(
-                    ['rclone', 'obscure', webdav_password],
-                    capture_output=True, text=True, timeout=10
-                )
-                if obscure_result.returncode == 0:
-                    obscured_pass = obscure_result.stdout.strip()
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
-                conf_content = f"""[webdav]
+        # WebDAV 配置：使用 rclone obscure 加密密码
+        webdav_user = current_user.webdav_username
+        webdav_password = current_user.webdav_password
+        
+        obscured_pass = None
+        if webdav_password:
+            obscure_result = subprocess.run(
+                ['rclone', 'obscure', webdav_password],
+                capture_output=True, text=True, timeout=10
+            )
+            if obscure_result.returncode == 0:
+                obscured_pass = obscure_result.stdout.strip()
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
+            conf_content = f"""[webdav]
 type = webdav
 url = {current_user.webdav_url}
 """
-                if webdav_user:
-                    conf_content += f"user = {webdav_user}\n"
-                if obscured_pass:
-                    conf_content += f"pass = {obscured_pass}\n"
-                f.write(conf_content)
-                rclone_conf = f.name
-            
-            remote_path = 'webdav:BiliSub'  # WebDAV 默认上传到 BiliSub 文件夹
-        else:
-            # GDrive 配置
-            sa_data = json.loads(current_user.cloud_service_account)
-            folder_name = current_user.cloud_folder_name
-            
-            # 调试日志
-            logger.info(f"[云存储] GDrive 同步: folder_name = '{folder_name}'")
-            
-            # 验证 folder_name 必须存在（Service Account 需要指定共享文件夹）
-            if not folder_name:
-                return jsonify({
-                    'success': False, 
-                    'error': '请在管理后台设置"目标文件夹 ID"（共享给 Service Account 的文件夹 ID）'
-                }), 400
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                json.dump(sa_data, f)
-                sa_file = f.name
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
-                conf_content = f"""[gdrive]
-type = drive
-scope = drive
-service_account_file = {sa_file}
-"""
-                f.write(conf_content)
-                rclone_conf = f.name
-            
-            remote_path = 'gdrive:'
-            
-            # 调试：打印生成的配置内容
-            logger.info(f"[云存储] rclone 配置内容:\n{conf_content}")
-            logger.info(f"[云存储] 使用 --drive-root-folder-id={folder_name}")
+            if webdav_user:
+                conf_content += f"user = {webdav_user}\n"
+            if obscured_pass:
+                conf_content += f"pass = {obscured_pass}\n"
+            f.write(conf_content)
+            rclone_conf = f.name
+        
+        remote_path = 'webdav:BiliSub'
         
         # 执行同步
-        logger.info(f"[云存储] 执行 rclone copy {sync_dir} -> {remote_path}")
-        
-        # 构建命令
-        cmd = [
-            'rclone', '--config', rclone_conf,
-            'copy', sync_dir, remote_path,
-            '--ignore-existing',
-            '-v'
-        ]
-        
-        # 对于 GDrive，添加 --drive-root-folder-id 参数
-        if storage_type != 'webdav' and folder_name:
-            cmd.extend(['--drive-root-folder-id', folder_name])
-            logger.info(f"[云存储] 添加参数: --drive-root-folder-id {folder_name}")
-        
         result = subprocess.run(
-            cmd,
+            [
+                'rclone', '--config', rclone_conf,
+                'copy', sync_dir, remote_path,
+                '--ignore-existing',
+                '-v'
+            ],
             capture_output=True, text=True, timeout=300
         )
         
-        # 调试：打印完整输出
-        logger.info(f"[云存储] rclone returncode: {result.returncode}")
-        if result.stderr:
-            logger.info(f"[云存储] rclone stderr (前500字符): {result.stderr[:500]}")
-        
         # 清理临时文件
-        if sa_file:
-            os.unlink(sa_file)
         os.unlink(rclone_conf)
         shutil.rmtree(sync_dir)
         
@@ -4928,7 +4777,7 @@ service_account_file = {sa_file}
             uploaded = result.stderr.count('Copied')
             return jsonify({
                 'success': True,
-                'message': f'同步完成！已上传 {uploaded} 个文件到 {storage_type.upper()}',
+                'message': f'同步完成！已上传 {uploaded} 个文件到 WebDAV',
                 'synced': uploaded
             })
         else:
