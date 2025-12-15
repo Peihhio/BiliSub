@@ -4672,24 +4672,34 @@ def cloud_storage_test():
             return jsonify({'success': False, 'error': '请先配置 WebDAV 地址'}), 400
         
         try:
+            # 使用 rclone obscure 加密密码
+            obscured_pass = None
+            if webdav_password:
+                obscure_result = subprocess.run(
+                    ['rclone', 'obscure', webdav_password],
+                    capture_output=True, text=True, timeout=10
+                )
+                if obscure_result.returncode == 0:
+                    obscured_pass = obscure_result.stdout.strip()
+                else:
+                    logger.warning(f"[WebDAV] rclone obscure 失败: {obscure_result.stderr}")
+            
             with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
                 conf_content = f"""[webdav]
 type = webdav
 url = {webdav_url}
 """
+                if webdav_username:
+                    conf_content += f"user = {webdav_username}\n"
+                if obscured_pass:
+                    conf_content += f"pass = {obscured_pass}\n"
+                
                 f.write(conf_content)
                 rclone_conf = f.name
             
-            # 构建命令，使用命令行参数传递用户名和密码（明文）
-            cmd = ['rclone', '--config', rclone_conf, 'lsd', 'webdav:', '--max-depth', '1']
-            if webdav_username:
-                cmd.extend(['--webdav-user', webdav_username])
-            if webdav_password:
-                cmd.extend(['--webdav-pass', webdav_password])
-            
             # 测试连接
             result = subprocess.run(
-                cmd,
+                ['rclone', '--config', rclone_conf, 'lsd', 'webdav:', '--max-depth', '1'],
                 capture_output=True, text=True, timeout=30
             )
             
@@ -4821,17 +4831,29 @@ bvid: "{item.bvid or ''}"
         
         # 根据存储类型创建 rclone 配置
         sa_file = None
-        webdav_user = None
-        webdav_pass = None
         if storage_type == 'webdav':
-            # WebDAV 配置（用户名密码通过 CLI 参数传递）
+            # WebDAV 配置：使用 rclone obscure 加密密码
             webdav_user = current_user.webdav_username
-            webdav_pass = current_user.webdav_password
+            webdav_password = current_user.webdav_password
+            
+            obscured_pass = None
+            if webdav_password:
+                obscure_result = subprocess.run(
+                    ['rclone', 'obscure', webdav_password],
+                    capture_output=True, text=True, timeout=10
+                )
+                if obscure_result.returncode == 0:
+                    obscured_pass = obscure_result.stdout.strip()
+            
             with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
                 conf_content = f"""[webdav]
 type = webdav
 url = {current_user.webdav_url}
 """
+                if webdav_user:
+                    conf_content += f"user = {webdav_user}\n"
+                if obscured_pass:
+                    conf_content += f"pass = {obscured_pass}\n"
                 f.write(conf_content)
                 rclone_conf = f.name
             
@@ -4885,13 +4907,6 @@ service_account_file = {sa_file}
         if storage_type != 'webdav' and folder_name:
             cmd.extend(['--drive-root-folder-id', folder_name])
             logger.info(f"[云存储] 添加参数: --drive-root-folder-id {folder_name}")
-        
-        # 对于 WebDAV，添加用户名密码参数
-        if storage_type == 'webdav':
-            if webdav_user:
-                cmd.extend(['--webdav-user', webdav_user])
-            if webdav_pass:
-                cmd.extend(['--webdav-pass', webdav_pass])
         
         result = subprocess.run(
             cmd,
